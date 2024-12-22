@@ -7,7 +7,6 @@ import nacl from "tweetnacl";
 
 import {
   Chain,
-  isSolanaWalletClient,
   SolanaReadRequest,
   SolanaTransaction,
   SolanaWalletClient,
@@ -108,7 +107,7 @@ const llm = new Ollama({
   baseUrl: "http://127.0.0.1:11434", // Default value
 });
 
-(async () => {
+export async function onchainAction(input: string) {
   console.log(
     `🔄 Funding Wallet Public Key: ${fundingWallet.publicKey.toBase58()}`
   );
@@ -139,23 +138,23 @@ const llm = new Ollama({
   const agentExecutor = new AgentExecutor({
     agent,
     tools,
-    // Enable this to see the agent's thought process
-    // verbose: true,
   });
 
   const balanceResponse = await agentExecutor.invoke({
-    input: "Get my balance in SOL",
+    input: input,
   });
 
   console.log("Response:", balanceResponse);
 
-  const transferPrompt = `Transfer ${
-    transferAmount / LAMPORTS_PER_SOL / 10
-  } SOL to ${recipientPublicKey.toBase58()} and return the transaction hash as output or tell details of error if any`;
-  console.log(`🤖 Attempting to: ${transferPrompt}`);
-  const transferResponse = await agentExecutor.invoke({
-    input: transferPrompt,
-  });
+  return balanceResponse;
 
-  console.log("Transfer Response:", transferResponse);
-})();
+  // const transferPrompt = `Transfer ${
+  //   transferAmount / LAMPORTS_PER_SOL / 10
+  // } SOL to ${recipientPublicKey.toBase58()} and return the transaction hash as output or tell details of error if any`;
+  // console.log(`🤖 Attempting to: ${transferPrompt}`);
+  // const transferResponse = await agentExecutor.invoke({
+  //   input: transferPrompt,
+  // });
+
+  // console.log("Transfer Response:", transferResponse);
+}

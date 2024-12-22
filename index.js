@@ -36,6 +36,7 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
     }
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.onchainAction = onchainAction;
 var agents_1 = require("langchain/agents");
 var hub_1 = require("langchain/hub");
 var ollama_1 = require("@langchain/ollama");
@@ -136,53 +137,45 @@ var llm = new ollama_1.Ollama({
     model: "llama3.2", // Default value
     baseUrl: "http://127.0.0.1:11434", // Default value
 });
-(function () { return __awaiter(void 0, void 0, void 0, function () {
-    var recipientPublicKey, transferAmount, tools, prompt, agent, agentExecutor, balanceResponse, transferPrompt, transferResponse;
-    return __generator(this, function (_a) {
-        switch (_a.label) {
-            case 0:
-                console.log("\uD83D\uDD04 Funding Wallet Public Key: ".concat(fundingWallet.publicKey.toBase58()));
-                recipientPublicKey = new web3_js_1.PublicKey("HMfq3c1ovN1L3rqDsTawhf44RSVnMLnRib28jAqqcaMb");
-                transferAmount = web3_js_1.LAMPORTS_PER_SOL / 10;
-                // LangChain Integration
-                console.log("🔄 Setting up LangChain tools...");
-                return [4 /*yield*/, (0, adapter_langchain_1.getOnChainTools)({
-                        wallet: solanaClient, // Pass the Keypair directly
-                        plugins: [(0, core_1.sendSOL)()],
-                    })];
-            case 1:
-                tools = _a.sent();
-                return [4 /*yield*/, (0, hub_1.pull)("hwchase17/structured-chat-agent")];
-            case 2:
-                prompt = _a.sent();
-                return [4 /*yield*/, (0, agents_1.createStructuredChatAgent)({
-                        llm: llm,
+function onchainAction(input) {
+    return __awaiter(this, void 0, void 0, function () {
+        var recipientPublicKey, transferAmount, tools, prompt, agent, agentExecutor, balanceResponse;
+        return __generator(this, function (_a) {
+            switch (_a.label) {
+                case 0:
+                    console.log("\uD83D\uDD04 Funding Wallet Public Key: ".concat(fundingWallet.publicKey.toBase58()));
+                    recipientPublicKey = new web3_js_1.PublicKey("HMfq3c1ovN1L3rqDsTawhf44RSVnMLnRib28jAqqcaMb");
+                    transferAmount = web3_js_1.LAMPORTS_PER_SOL / 10;
+                    // LangChain Integration
+                    console.log("🔄 Setting up LangChain tools...");
+                    return [4 /*yield*/, (0, adapter_langchain_1.getOnChainTools)({
+                            wallet: solanaClient, // Pass the Keypair directly
+                            plugins: [(0, core_1.sendSOL)()],
+                        })];
+                case 1:
+                    tools = _a.sent();
+                    return [4 /*yield*/, (0, hub_1.pull)("hwchase17/structured-chat-agent")];
+                case 2:
+                    prompt = _a.sent();
+                    return [4 /*yield*/, (0, agents_1.createStructuredChatAgent)({
+                            llm: llm,
+                            tools: tools,
+                            prompt: prompt,
+                        })];
+                case 3:
+                    agent = _a.sent();
+                    agentExecutor = new agents_1.AgentExecutor({
+                        agent: agent,
                         tools: tools,
-                        prompt: prompt,
-                    })];
-            case 3:
-                agent = _a.sent();
-                agentExecutor = new agents_1.AgentExecutor({
-                    agent: agent,
-                    tools: tools,
-                    // Enable this to see the agent's thought process
-                    // verbose: true,
-                });
-                return [4 /*yield*/, agentExecutor.invoke({
-                        input: "Get my balance in SOL",
-                    })];
-            case 4:
-                balanceResponse = _a.sent();
-                console.log("Response:", balanceResponse);
-                transferPrompt = "Transfer ".concat(transferAmount / web3_js_1.LAMPORTS_PER_SOL / 10, " SOL to ").concat(recipientPublicKey.toBase58(), " and return the transaction hash as output or tell details of error if any");
-                console.log("\uD83E\uDD16 Attempting to: ".concat(transferPrompt));
-                return [4 /*yield*/, agentExecutor.invoke({
-                        input: transferPrompt,
-                    })];
-            case 5:
-                transferResponse = _a.sent();
-                console.log("Transfer Response:", transferResponse);
-                return [2 /*return*/];
-        }
+                    });
+                    return [4 /*yield*/, agentExecutor.invoke({
+                            input: input,
+                        })];
+                case 4:
+                    balanceResponse = _a.sent();
+                    console.log("Response:", balanceResponse);
+                    return [2 /*return*/, balanceResponse];
+            }
+        });
     });
-}); })();
+}
