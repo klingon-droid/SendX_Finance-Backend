@@ -1,10 +1,11 @@
+import Redis from 'ioredis';
+import { Scraper, SearchMode } from 'agent-twitter-client';
+import cron from 'node-cron';
+// import { onchainAction } from './index.js';
+import { PrivyClient } from '@privy-io/server-auth';
+import dotenv from 'dotenv';
 
-const Redis = require('ioredis');
-const { Scraper, SearchMode } = require('agent-twitter-client');
-const cron = require('node-cron');
-const { onchainAction } = require('./index');
-
-require('dotenv').config();
+dotenv.config();
 
 const redis = new Redis({
     host: process.env.REDIS_HOST,
@@ -23,7 +24,7 @@ async function saveLastRepliedTweetId(tweetId) {
     await redis.set(LAST_REPLIED_TWEET_KEY, tweetId);
 }
 
-async function main(scraper) {
+async function main(scraper, privyClient) {
     try {
         const getTweets = await scraper.fetchSearchTweets(
             `@${process.env.MY_USERNAME}`,
@@ -65,7 +66,7 @@ async function main(scraper) {
 
                     // Call your function to reply to the tweet
                     try {
-                        await replyToTweet(scraper, tweet);
+                        await replyToTweet(scraper, tweet, privyClient);
                         console.log('Replied to tweet ID:', tweet.id);
                     } catch (replyError) {
                         console.error('Error replying to tweet ID:', tweet.id, replyError);
@@ -77,8 +78,8 @@ async function main(scraper) {
             }
 
             // Update the last replied tweet ID to the latest tweet's ID
-            await saveLastRepliedTweetId(formattedTweets[ 0 ].id);
-            console.log('Updated last replied tweet ID to:', formattedTweets[ 0 ].id);
+            await saveLastRepliedTweetId(formattedTweets[0].id);
+            console.log('Updated last replied tweet ID to:', formattedTweets[0].id);
         } else {
             console.log('No tweets found.');
         }
@@ -87,11 +88,37 @@ async function main(scraper) {
     }
 }
 
-async function replyToTweet(scraper, tweet) {
+async function replyToTweet(scraper, tweet, privyClient) {
     try {
-        const response = await onchainAction(tweet.text);
+        const username = 'crypt0_tracker'; // @TODO: make this dynamic
+
+        const user = await privyClient.getUserByTwitterUsername(username);
+        console.log('User already exists:', user);
+        if (!user) {
+            console.log('User not found:', username);
+            const userDetails = await scraper.getProfile(username)
+            console.log('User details:', userDetails);
+            const user = await privyClient.importUser({
+                linkedAccounts: [
+                    {
+                        type: 'twitter_oauth',
+                        subject: userDetails.userId,
+                        name: userDetails.name,
+                        username: userDetails.username,
+                    },
+                ],
+                createSolanaWallet: true,
+                customMetadata: {
+                    username: userDetails.username
+                },
+            });
+            console.log('User imported via twitter username:', user);
+        }
+
+        // const response = await onchainAction(tweet.text); @TODO: Uncomment when done testing
+
         console.log(`Replying to tweet ID: ${tweet.id}`);
-        await scraper.sendTweet(response.output, tweet.id);
+        await scraper.sendTweet('Hello', tweet.id);
         console.log('Replied to tweet ID:', tweet.id);
         // Example: await scraper.replyToTweet(tweet.id, 'Your reply message here');
     } catch (error) {
@@ -102,6 +129,10 @@ async function replyToTweet(scraper, tweet) {
 
 async function start() {
     const scraper = new Scraper();
+    const client = new PrivyClient(
+        process.env.PRIVY_CLIENT_ID,
+        process.env.PRIVY_CLIENT_SECRET
+    );
     // v1 login
     console.log(process.env.MY_USERNAME, process.env.PASSWORD, process.env.EMAIL);
     try {
@@ -119,7 +150,7 @@ async function start() {
     // Schedule the main function to run every 20 seconds
     cron.schedule('*/20 * * * * *', async () => {
         console.log('Running the scheduled task...');
-        await main(scraper);
+        await main(scraper, client);
     });
 }
 
