@@ -29,6 +29,4 @@
     "tweetnacl": "^1.0.3",
     "typescript": "^5.7.2",
     "viem": "2.21.49"
-  },
-  "type": "module"
-}
+  }}

@@ -1,9 +1,11 @@
-import Redis from 'ioredis';
-import { Scraper, SearchMode } from 'agent-twitter-client';
-import cron from 'node-cron';
-// import { onchainAction } from './index.js';
-import { PrivyClient } from '@privy-io/server-auth';
-import dotenv from 'dotenv';
+const Redis = require('ioredis');
+const { Scraper, SearchMode } = require('agent-twitter-client');
+const cron = require('node-cron');
+const { onchainAction } = require('./onchainaction');
+const { getUsername } = require('./username');
+const { PrivyClient } = require('@privy-io/server-auth');
+const dotenv = require('dotenv');
+const { Ollama } = require("@langchain/ollama");
 
 dotenv.config();
 
@@ -24,14 +26,65 @@ async function saveLastRepliedTweetId(tweetId) {
     await redis.set(LAST_REPLIED_TWEET_KEY, tweetId);
 }
 
-async function main(scraper, privyClient) {
+async function replyToTweet(scraper, tweet, privyClient, llm) {
+    try {
+        const tweetText = tweet.text;
+        const { username, amount } = await getUsername(tweetText, llm);
+        console.log('Username:', username);
+        console.log('Amount:', amount);
+
+        let user = await privyClient.getUserByTwitterUsername(username);
+        console.log('User already exists');
+        if (!user) {
+            console.log('User not found:', username);
+            const userDetails = await scraper.getProfile(username)
+            console.log('User details:', userDetails);
+            user = await privyClient.importUser({
+                linkedAccounts: [
+                    {
+                        type: 'twitter_oauth',
+                        subject: userDetails.userId,
+                        name: userDetails.name,
+                        username: userDetails.username,
+                    },
+                ],
+                createSolanaWallet: true,
+                customMetadata: {
+                    username: userDetails.username
+                },
+            });
+            console.log('User imported via twitter username:', user.wallet.address);
+        }
+        console.log("Waiting for 10 seconds");
+        //make the program wait here for 20 seconds
+        await new Promise(resolve => setTimeout(resolve, 10000));
+        console.log("10 seconds passed");
+
+
+        const prompt = `Send ${amount} SOL to ${user.wallet.address} , only return the transaction hash as output , nothing else.`;
+        console.log("Prompt:", prompt);
+        // const response = await onchainAction(prompt, llm); // @TODO: Uncomment when done testing
+        const response = await onchainAction(user.wallet.address, amount);
+
+        console.log(`Replying to tweet ID: ${tweet.id}`);
+        console.log('Response:', response);
+        await scraper.sendTweet(`https://solscan.io/tx/${response}?cluster=devnet`, tweet.id);
+        console.log('Replied to tweet ID:', tweet.id);
+        // Example: await scraper.replyToTweet(tweet.id, 'Your reply message here');
+    } catch (error) {
+        console.error('Error in replyToTweet function:', error);
+        throw error; // Re-throw the error to be caught in the main function
+    }
+}
+
+async function main(scraper, privyClient, llm) {
     try {
         const getTweets = await scraper.fetchSearchTweets(
             `@${process.env.MY_USERNAME}`,
             20,
             SearchMode.Latest
         );
-        console.log('Fetched tweets:', getTweets);
+        // console.log('Fetched tweets:', getTweets);
 
         const formattedTweets = getTweets.tweets.map(tweet => ({
             id: tweet.id,
@@ -62,11 +115,11 @@ async function main(scraper, privyClient) {
                 console.log('Processing tweet ID:', tweet.id);
 
                 if (tweetIdNum > lastRepliedTweetIdNum) {
-                    console.log('New tweet found:', tweet);
+                    // console.log('New tweet found:', tweet);
 
                     // Call your function to reply to the tweet
                     try {
-                        await replyToTweet(scraper, tweet, privyClient);
+                        await replyToTweet(scraper, tweet, privyClient, llm);
                         console.log('Replied to tweet ID:', tweet.id);
                     } catch (replyError) {
                         console.error('Error replying to tweet ID:', tweet.id, replyError);
@@ -76,10 +129,9 @@ async function main(scraper, privyClient) {
                     break;
                 }
             }
-
-            // Update the last replied tweet ID to the latest tweet's ID
-            await saveLastRepliedTweetId(formattedTweets[0].id);
-            console.log('Updated last replied tweet ID to:', formattedTweets[0].id);
+            console.log("for loop ended , going to save the last replied tweet id");
+            await saveLastRepliedTweetId(formattedTweets[ 0 ].id);
+            console.log('Updated last replied tweet ID to:', formattedTweets[ 0 ].id);
         } else {
             console.log('No tweets found.');
         }
@@ -88,44 +140,7 @@ async function main(scraper, privyClient) {
     }
 }
 
-async function replyToTweet(scraper, tweet, privyClient) {
-    try {
-        const username = 'crypt0_tracker'; // @TODO: make this dynamic
 
-        const user = await privyClient.getUserByTwitterUsername(username);
-        console.log('User already exists:', user);
-        if (!user) {
-            console.log('User not found:', username);
-            const userDetails = await scraper.getProfile(username)
-            console.log('User details:', userDetails);
-            const user = await privyClient.importUser({
-                linkedAccounts: [
-                    {
-                        type: 'twitter_oauth',
-                        subject: userDetails.userId,
-                        name: userDetails.name,
-                        username: userDetails.username,
-                    },
-                ],
-                createSolanaWallet: true,
-                customMetadata: {
-                    username: userDetails.username
-                },
-            });
-            console.log('User imported via twitter username:', user);
-        }
-
-        // const response = await onchainAction(tweet.text); @TODO: Uncomment when done testing
-
-        console.log(`Replying to tweet ID: ${tweet.id}`);
-        await scraper.sendTweet('Hello', tweet.id);
-        console.log('Replied to tweet ID:', tweet.id);
-        // Example: await scraper.replyToTweet(tweet.id, 'Your reply message here');
-    } catch (error) {
-        console.error('Error in replyToTweet function:', error);
-        throw error; // Re-throw the error to be caught in the main function
-    }
-}
 
 async function start() {
     const scraper = new Scraper();
@@ -146,11 +161,16 @@ async function start() {
         console.error('Error logging in:', error);
         return;
     }
+    const llm = new Ollama({
+        model: "llama3.2", // Default value
+        baseUrl: "http://127.0.0.1:11434", // Default value
+    });
 
     // Schedule the main function to run every 20 seconds
-    cron.schedule('*/20 * * * * *', async () => {
+    cron.schedule('*/60 * * * * *', async () => {
         console.log('Running the scheduled task...');
-        await main(scraper, client);
+        await main(scraper, client, llm);
+        console.log("_______________________________________________________________________________________________________________ \n");
     });
 }
 

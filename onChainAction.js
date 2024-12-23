@@ -37,14 +37,11 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.onchainAction = onchainAction;
-var agents_1 = require("langchain/agents");
-var hub_1 = require("langchain/hub");
-var ollama_1 = require("@langchain/ollama");
 var tweetnacl_1 = require("tweetnacl");
 var web3_js_1 = require("@solana/web3.js");
 var bs58_1 = require("bs58");
-var adapter_langchain_1 = require("@goat-sdk/adapter-langchain");
-var core_1 = require("@goat-sdk/core");
+var web3_js_2 = require("@solana/web3.js");
+var web3_js_3 = require("@solana/web3.js");
 require("dotenv").config();
 var SOLANA_PRIVATE_KEY = process.env.SOLANA_PRIVATE_KEY;
 // Create a Solana wallet
@@ -133,48 +130,33 @@ var SolanaWalletClientImpl = /** @class */ (function () {
     return SolanaWalletClientImpl;
 }());
 var solanaClient = new SolanaWalletClientImpl(fundingWallet, connection);
-var llm = new ollama_1.Ollama({
-    model: "llama3.2", // Default value
-    baseUrl: "http://127.0.0.1:11434", // Default value
-});
-function onchainAction(input) {
+function onchainAction(address, amount) {
     return __awaiter(this, void 0, void 0, function () {
-        var recipientPublicKey, transferAmount, tools, prompt, agent, agentExecutor, balanceResponse;
+        var recipientPublicKey, transferAmount, tx, signature, error_1;
         return __generator(this, function (_a) {
             switch (_a.label) {
                 case 0:
+                    _a.trys.push([0, 2, , 3]);
                     console.log("\uD83D\uDD04 Funding Wallet Public Key: ".concat(fundingWallet.publicKey.toBase58()));
-                    recipientPublicKey = new web3_js_1.PublicKey("HMfq3c1ovN1L3rqDsTawhf44RSVnMLnRib28jAqqcaMb");
-                    transferAmount = web3_js_1.LAMPORTS_PER_SOL / 10;
-                    // LangChain Integration
-                    console.log("🔄 Setting up LangChain tools...");
-                    return [4 /*yield*/, (0, adapter_langchain_1.getOnChainTools)({
-                            wallet: solanaClient, // Pass the Keypair directly
-                            plugins: [(0, core_1.sendSOL)()],
-                        })];
+                    recipientPublicKey = new web3_js_1.PublicKey(address);
+                    transferAmount = amount * web3_js_2.LAMPORTS_PER_SOL;
+                    tx = new web3_js_1.Transaction().add(web3_js_3.SystemProgram.transfer({
+                        fromPubkey: fundingWallet.publicKey,
+                        toPubkey: recipientPublicKey,
+                        lamports: transferAmount,
+                    }));
+                    return [4 /*yield*/, (0, web3_js_1.sendAndConfirmTransaction)(connection, tx, [
+                            fundingWallet,
+                        ])];
                 case 1:
-                    tools = _a.sent();
-                    return [4 /*yield*/, (0, hub_1.pull)("hwchase17/structured-chat-agent")];
+                    signature = _a.sent();
+                    console.log("Transaction sent and confirmed");
+                    return [2 /*return*/, signature];
                 case 2:
-                    prompt = _a.sent();
-                    return [4 /*yield*/, (0, agents_1.createStructuredChatAgent)({
-                            llm: llm,
-                            tools: tools,
-                            prompt: prompt,
-                        })];
-                case 3:
-                    agent = _a.sent();
-                    agentExecutor = new agents_1.AgentExecutor({
-                        agent: agent,
-                        tools: tools,
-                    });
-                    return [4 /*yield*/, agentExecutor.invoke({
-                            input: input,
-                        })];
-                case 4:
-                    balanceResponse = _a.sent();
-                    console.log("Response:", balanceResponse);
-                    return [2 /*return*/, balanceResponse];
+                    error_1 = _a.sent();
+                    console.error("Error in onchainAction:", error_1);
+                    throw error_1;
+                case 3: return [2 /*return*/];
             }
         });
     });

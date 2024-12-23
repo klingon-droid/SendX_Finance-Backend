@@ -1,13 +1,10 @@
 import type { ChatPromptTemplate } from "@langchain/core/prompts";
-import { ChatOpenAI } from "@langchain/openai";
 import { AgentExecutor, createStructuredChatAgent } from "langchain/agents";
 import { pull } from "langchain/hub";
-import { Ollama } from "@langchain/ollama";
 import nacl from "tweetnacl";
 
 import {
   Chain,
-  isSolanaWalletClient,
   SolanaReadRequest,
   SolanaTransaction,
   SolanaWalletClient,
@@ -15,7 +12,6 @@ import {
 import {
   Connection,
   Keypair,
-  LAMPORTS_PER_SOL,
   PublicKey,
   Transaction,
   clusterApiUrl,
@@ -25,6 +21,8 @@ import bs58 from "bs58";
 
 import { getOnChainTools } from "@goat-sdk/adapter-langchain";
 import { sendSOL } from "@goat-sdk/core";
+import { LAMPORTS_PER_SOL } from "@solana/web3.js";
+import { SystemProgram } from "@solana/web3.js";
 
 require("dotenv").config();
 
@@ -103,59 +101,77 @@ class SolanaWalletClientImpl implements SolanaWalletClient {
 
 const solanaClient = new SolanaWalletClientImpl(fundingWallet, connection);
 
-const llm = new Ollama({
-  model: "llama3.2", // Default value
-  baseUrl: "http://127.0.0.1:11434", // Default value
-});
+async function onchainAction(address: string, amount: number) {
+  try {
+    console.log(
+      `🔄 Funding Wallet Public Key: ${fundingWallet.publicKey.toBase58()}`
+    );
 
-(async () => {
-  console.log(
-    `🔄 Funding Wallet Public Key: ${fundingWallet.publicKey.toBase58()}`
-  );
+    const recipientPublicKey = new PublicKey(address);
+    const transferAmount = amount * LAMPORTS_PER_SOL;
+    const tx = new Transaction().add(
+      SystemProgram.transfer({
+        fromPubkey: fundingWallet.publicKey,
+        toPubkey: recipientPublicKey,
+        lamports: transferAmount,
+      })
+    );
+    const signature = await sendAndConfirmTransaction(connection, tx, [
+      fundingWallet,
+    ]);
+    console.log("Transaction sent and confirmed");
+    return signature;
 
-  // Transfer some SOL to another address
-  const recipientPublicKey = new PublicKey(
-    "HMfq3c1ovN1L3rqDsTawhf44RSVnMLnRib28jAqqcaMb"
-  );
-  const transferAmount = LAMPORTS_PER_SOL / 10; // 0.01 SOL
+    // Transfer some SOL to another address
+    // const recipientPublicKey = new PublicKey(
+    //   "HMfq3c1ovN1L3rqDsTawhf44RSVnMLnRib28jAqqcaMb"
+    // );
+    // const transferAmount = LAMPORTS_PER_SOL / 10; // 0.01 SOL
 
-  // LangChain Integration
-  console.log("🔄 Setting up LangChain tools...");
-  const tools = await getOnChainTools({
-    wallet: solanaClient, // Pass the Keypair directly
-    plugins: [sendSOL()],
-  });
+    // LangChain Integration
 
-  const prompt = await pull<ChatPromptTemplate>(
-    "hwchase17/structured-chat-agent"
-  );
+    // console.log("🔄 Setting up LangChain tools...");
+    // const tools = await getOnChainTools({
+    //   wallet: solanaClient, // Pass the Keypair directly
+    //   plugins: [sendSOL()],
+    // });
 
-  const agent = await createStructuredChatAgent({
-    llm,
-    tools,
-    prompt,
-  });
+    // const prompt = await pull<ChatPromptTemplate>(
+    //   "hwchase17/structured-chat-agent"
+    // );
 
-  const agentExecutor = new AgentExecutor({
-    agent,
-    tools,
-    // Enable this to see the agent's thought process
-    // verbose: true,
-  });
+    // const agent = await createStructuredChatAgent({
+    //   llm,
+    //   tools,
+    //   prompt,
+    // });
 
-  const balanceResponse = await agentExecutor.invoke({
-    input: "Get my balance in SOL",
-  });
+    // const agentExecutor = new AgentExecutor({
+    //   agent,
+    //   tools,
+    // });
 
-  console.log("Response:", balanceResponse);
+    // console.log("going to call the agent");
+    // const balanceResponse = await agentExecutor.invoke({
+    //   input: input,
+    // });
+    // console.log("agent called");
 
-  const transferPrompt = `Transfer ${
-    transferAmount / LAMPORTS_PER_SOL / 10
-  } SOL to ${recipientPublicKey.toBase58()} and return the transaction hash as output or tell details of error if any`;
-  console.log(`🤖 Attempting to: ${transferPrompt}`);
-  const transferResponse = await agentExecutor.invoke({
-    input: transferPrompt,
-  });
+    // return balanceResponse;
+  } catch (error) {
+    console.error("Error in onchainAction:", error);
+    throw error;
+  }
 
-  console.log("Transfer Response:", transferResponse);
-})();
+  // const transferPrompt = `Transfer ${
+  //   transferAmount / LAMPORTS_PER_SOL / 10
+  // } SOL to ${recipientPublicKey.toBase58()} and return the transaction hash as output or tell details of error if any`;
+  // console.log(`🤖 Attempting to: ${transferPrompt}`);
+  // const transferResponse = await agentExecutor.invoke({
+  //   input: transferPrompt,
+  // });
+
+  // console.log("Transfer Response:", transferResponse);
+}
+
+export { onchainAction };
