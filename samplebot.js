@@ -6,6 +6,8 @@ const { getUsername } = require('./username');
 const { PrivyClient } = require('@privy-io/server-auth');
 const dotenv = require('dotenv');
 const { Ollama } = require("@langchain/ollama");
+const { ChatGroq } = require("@langchain/groq");
+const { default: axios } = require('axios');
 
 dotenv.config();
 
@@ -29,9 +31,26 @@ async function saveLastRepliedTweetId(tweetId) {
 async function replyToTweet(scraper, tweet, privyClient, llm) {
     try {
         const tweetText = tweet.text;
-        const { username, amount } = await getUsername(tweetText, llm);
+        const sender = tweet.username;
+
+        const senderinfo = await axios.get(`https://sendx-pi.vercel.app/api/userBalance?username=${sender}`);
+        if (senderinfo.data.data == null) {
+            console.log("User not found");
+            await scraper.sendTweet(`@${sender} Please register on https://sendx-pi.vercel.app`, tweet.id);
+        }
+        const balance = senderinfo.data.data.balance;
+
+
+
+        const { username, amount } = await getUsername(tweetText, llm, scraper, tweet.id);
         console.log('Username:', username);
         console.log('Amount:', amount);
+
+        if (balance < amount) {
+            console.log("Insufficient balance");
+            await scraper.sendTweet(`@${sender} Insufficient balance`, tweet.id);
+            return;
+        }
 
         let user = await privyClient.getUserByTwitterUsername(username);
         console.log('User already exists');
@@ -73,6 +92,7 @@ async function replyToTweet(scraper, tweet, privyClient, llm) {
         // Example: await scraper.replyToTweet(tweet.id, 'Your reply message here');
     } catch (error) {
         console.error('Error in replyToTweet function:', error);
+        await sendTweet(`@${sender} Error processing the transaction`, tweet.id);
         throw error; // Re-throw the error to be caught in the main function
     }
 }
@@ -161,9 +181,13 @@ async function start() {
         console.error('Error logging in:', error);
         return;
     }
-    const llm = new Ollama({
-        model: "llama3.2", // Default value
-        baseUrl: "http://127.0.0.1:11434", // Default value
+    // const llm = new Ollama({
+    //     model: "llama3.2", // Default value
+    //     baseUrl: "http://127.0.0.1:11434", // Default value
+    // });
+
+    const llm = new ChatGroq({
+        model: "llama3-8b-8192",
     });
 
     // Schedule the main function to run every 20 seconds

@@ -37,19 +37,21 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getUsername = getUsername;
-function getUsername(tweet, llm) {
+function getUsername(tweet, llm, scraper, id) {
     return __awaiter(this, void 0, void 0, function () {
-        var substr, prompt, response, data, username, amount;
+        var substr, prompt_1, response, data, username, amount, error_1;
         return __generator(this, function (_a) {
             switch (_a.label) {
                 case 0:
+                    _a.trys.push([0, 3, , 5]);
                     substr = tweet.replace("@crypt0_tracker", "");
-                    prompt = "Extract the recepient's username and amount to send from this message: ".concat(substr, ". Give the output in JSON format: {username: <username>, amount: <amount>}. only give json, nothing else.");
-                    console.log("Prompt:", prompt);
-                    return [4 /*yield*/, llm.invoke(prompt)];
+                    prompt_1 = "Extract the recepient's username and amount to send from this message: ".concat(substr, ". Give the output in JSON format: {username: <username>, amount: <amount>}. only give json, nothing else.");
+                    console.log("Prompt:", prompt_1);
+                    return [4 /*yield*/, llm.invoke(prompt_1)];
                 case 1:
                     response = _a.sent();
-                    return [4 /*yield*/, JSON.parse(response)];
+                    console.log("Response:", response.content);
+                    return [4 /*yield*/, JSON.parse(response.content)];
                 case 2:
                     data = _a.sent();
                     username = data.username.replace("@", "").trim();
@@ -57,6 +59,14 @@ function getUsername(tweet, llm) {
                     console.log("Username:", username);
                     console.log("Amount:", amount);
                     return [2 /*return*/, { username: username, amount: amount }];
+                case 3:
+                    error_1 = _a.sent();
+                    console.log("Error:", error_1);
+                    return [4 /*yield*/, scraper.sendTweet("Incorrect tweet format.", id)];
+                case 4:
+                    _a.sent();
+                    return [2 /*return*/, null];
+                case 5: return [2 /*return*/];
             }
         });
     });
