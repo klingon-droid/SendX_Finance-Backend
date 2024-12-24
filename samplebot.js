@@ -36,7 +36,7 @@ async function replyToTweet(scraper, tweet, privyClient, llm) {
         const senderinfo = await axios.get(`https://sendx-pi.vercel.app/api/userBalance?username=${sender}`);
         if (senderinfo.data.data == null) {
             console.log("User not found");
-            await scraper.sendTweet(`@${sender} Please register on https://sendx-pi.vercel.app`, tweet.id);
+            await scraper.sendTweet(`@${sender} Please register on https://sendx-pi.vercel.app `, tweet.id);
         }
         const balance = senderinfo.data.data.balance;
 
@@ -47,8 +47,8 @@ async function replyToTweet(scraper, tweet, privyClient, llm) {
         console.log('Amount:', amount);
 
         if (balance < amount) {
-            console.log("Insufficient balance");
-            await scraper.sendTweet(`@${sender} Insufficient balance`, tweet.id);
+            console.log("Deposited funds are insufficient");
+            await scraper.sendTweet(`@${sender} Deposited funds are insufficient`, tweet.id);
             return;
         }
 
@@ -84,6 +84,10 @@ async function replyToTweet(scraper, tweet, privyClient, llm) {
         console.log("Prompt:", prompt);
         // const response = await onchainAction(prompt, llm); // @TODO: Uncomment when done testing
         const response = await onchainAction(user.wallet.address, amount);
+        const updateDB = await axios.post("https://sendx-pi.vercel.app/api/userBalance", {
+            username: sender,
+            balance: balance - amount,
+        })
 
         console.log(`Replying to tweet ID: ${tweet.id}`);
         console.log('Response:', response);
