@@ -1,8 +1,8 @@
 const Redis = require('ioredis');
 const { Scraper, SearchMode } = require('agent-twitter-client');
 const cron = require('node-cron');
-const { onchainAction } = require('./onchainaction');
-const { getUsername } = require('./username');
+const { onchainAction } = require('./onChainAction.js');
+const { getUsername } = require('./username.js');
 const { PrivyClient } = require('@privy-io/server-auth');
 const dotenv = require('dotenv');
 const { Ollama } = require("@langchain/ollama");
