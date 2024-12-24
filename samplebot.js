@@ -74,10 +74,10 @@ async function replyToTweet(scraper, tweet, privyClient, llm) {
             });
             console.log('User imported via twitter username:', user.wallet.address);
         }
-        console.log("Waiting for 10 seconds");
-        //make the program wait here for 20 seconds
-        await new Promise(resolve => setTimeout(resolve, 10000));
-        console.log("10 seconds passed");
+        console.log("Waiting for 5 seconds");
+        //make the program wait here for 5 seconds
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        console.log("5 seconds passed");
 
 
         const prompt = `Send ${amount} SOL to ${user.wallet.address} , only return the transaction hash as output , nothing else.`;

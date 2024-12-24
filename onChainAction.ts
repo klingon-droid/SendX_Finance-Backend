@@ -108,6 +108,7 @@ async function onchainAction(address: string, amount: number) {
     );
 
     const recipientPublicKey = new PublicKey(address);
+    console.log(`🔄 Recipient Public Key: ${recipientPublicKey.toBase58()}`);
     const transferAmount = amount * LAMPORTS_PER_SOL;
     const tx = new Transaction().add(
       SystemProgram.transfer({

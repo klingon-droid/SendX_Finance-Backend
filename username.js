@@ -44,7 +44,7 @@ function getUsername(tweet, llm, scraper, id) {
             switch (_a.label) {
                 case 0:
                     _a.trys.push([0, 3, , 5]);
-                    substr = tweet.replace("@crypt0_tracker", "");
+                    substr = tweet.replace("@SendX_AI", "");
                     prompt_1 = "Extract the recepient's username and amount to send from this message: ".concat(substr, ". Give the output in JSON format: {username: <username>, amount: <amount>}. only give json, nothing else.");
                     console.log("Prompt:", prompt_1);
                     return [4 /*yield*/, llm.invoke(prompt_1)];

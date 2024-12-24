@@ -139,6 +139,7 @@ function onchainAction(address, amount) {
                     _a.trys.push([0, 2, , 3]);
                     console.log("\uD83D\uDD04 Funding Wallet Public Key: ".concat(fundingWallet.publicKey.toBase58()));
                     recipientPublicKey = new web3_js_1.PublicKey(address);
+                    console.log("\uD83D\uDD04 Recipient Public Key: ".concat(recipientPublicKey.toBase58()));
                     transferAmount = amount * web3_js_2.LAMPORTS_PER_SOL;
                     tx = new web3_js_1.Transaction().add(web3_js_3.SystemProgram.transfer({
                         fromPubkey: fundingWallet.publicKey,
