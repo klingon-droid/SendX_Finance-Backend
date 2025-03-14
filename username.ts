@@ -6,7 +6,7 @@ export async function getUsername(
 ) {
   //remove the @crypt0_tracker part from the tweet
   try {
-    const substr = tweet.replace("@crypt0_tracker", "");
+    const substr = tweet.replace("@SendX_Finance", "");
     const prompt = `Extract the recepient's username and amount to send from this message: ${substr}. Give the output in JSON format: {username: <username>, amount: <amount>}. only give json, nothing else.`;
     console.log("Prompt:", prompt);
     const response = await llm.invoke(prompt);

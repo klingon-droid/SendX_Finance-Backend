@@ -4,7 +4,10 @@
   "description": "",
   "private": true,
   "scripts": {
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "build": "tsc",
+    "start": "node samplebot.js",
+    "dev": "node samplebot.js"
   },
   "author": "",
   "license": "MIT",
@@ -32,5 +35,8 @@
     "tweetnacl": "^1.0.3",
     "typescript": "^5.7.2",
     "viem": "2.21.49"
+  },
+  "devDependencies": {
+    "ts-node": "^10.9.2"
   }
 }

@@ -16,6 +16,9 @@ const redis = new Redis({
     port: process.env.REDIS_PORT,
     username: process.env.REDIS_USERNAME,
     password: process.env.REDIS_PASSWORD,
+    tls: {
+        rejectUnauthorized: false
+    }
 });
 
 const LAST_REPLIED_TWEET_KEY = 'lastRepliedTweetId';
@@ -33,10 +36,10 @@ async function replyToTweet(scraper, tweet, privyClient, llm) {
         const tweetText = tweet.text;
         const sender = tweet.username;
 
-        const senderinfo = await axios.get(`https://sendx-pi.vercel.app/api/userBalance?username=${sender}`);
+        const senderinfo = await axios.get(`https://send-x-frontend.vercel.app/api/userBalance?username=${sender}`);
         if (senderinfo.data.data == null) {
             console.log("User not found");
-            await scraper.sendTweet(`@${sender} Please register on https://sendx-pi.vercel.app `, tweet.id);
+            await scraper.sendTweet(`@${sender} Please register on https://send-x-frontend.vercel.app `, tweet.id);
         }
         const balance = senderinfo.data.data.balance;
 
@@ -84,7 +87,7 @@ async function replyToTweet(scraper, tweet, privyClient, llm) {
         console.log("Prompt:", prompt);
         // const response = await onchainAction(prompt, llm); // @TODO: Uncomment when done testing
         const response = await onchainAction(user.wallet.address, amount);
-        const updateDB = await axios.post("https://sendx-pi.vercel.app/api/userBalance", {
+        const updateDB = await axios.post("https://send-x-frontend.vercel.app/api/userBalance", {
             username: sender,
             balance: balance - amount,
         })
@@ -191,7 +194,8 @@ async function start() {
     // });
 
     const llm = new ChatGroq({
-        model: "llama3-8b-8192",
+        apiKey: process.env.GROQ_API_KEY,
+        model: "llama3-8b-8192"
     });
 
     // Schedule the main function to run every 20 seconds
