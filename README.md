@@ -2,7 +2,7 @@
 
 ## Overview
 
-SendX is a Twitter-powered Solana payment solution that allows users to send SOL to any Twitter user through simple tweets. The backend consists of a Twitter bot that monitors mentions, processes payment requests, and executes Solana transactions on the devnet.
+SendX is a Twitter-powered Solana payment solution that allows users to send SOL to any Twitter user through simple tweets. The backend consists of a Twitter bot that monitors mentions, processes payment requests, and executes Solana transactions on the mainnet-beta.
 
 ![SendX Logo](https://i.imgur.com/placeholder-for-logo.png)
 
@@ -19,7 +19,7 @@ SendX is a Twitter-powered Solana payment solution that allows users to send SOL
 The SendX backend consists of several key components:
 
 1. **Twitter Bot**: Monitors mentions and processes payment requests
-2. **Solana Integration**: Executes transactions on the Solana devnet
+2. **Solana Integration**: Executes transactions on the Solana mainnet-beta
 3. **AI Processing**: Uses Groq LLM to extract payment details from tweets
 4. **State Management**: Uses Redis to track processed tweets
 5. **User Management**: Integrates with Privy for user authentication and wallet management
@@ -31,7 +31,7 @@ The SendX backend consists of several key components:
 - Privy account
 - Twitter developer account
 - Groq API key
-- Solana wallet with devnet SOL
+- Solana wallet with mainnet SOL
 
 ## Environment Variables
 

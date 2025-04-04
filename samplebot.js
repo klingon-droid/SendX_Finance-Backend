@@ -94,7 +94,7 @@ async function replyToTweet(scraper, tweet, privyClient, llm) {
 
         console.log(`Replying to tweet ID: ${tweet.id}`);
         console.log('Response:', response);
-        await scraper.sendTweet(`https://solscan.io/tx/${response}?cluster=devnet`, tweet.id);
+        await scraper.sendTweet(`https://solscan.io/tx/${response}`, tweet.id);
         console.log('Replied to tweet ID:', tweet.id);
         // Example: await scraper.replyToTweet(tweet.id, 'Your reply message here');
     } catch (error) {

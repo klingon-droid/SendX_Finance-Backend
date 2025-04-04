@@ -31,8 +31,8 @@ const SOLANA_PRIVATE_KEY = process.env.SOLANA_PRIVATE_KEY as string;
 // Create a Solana wallet
 const fundingWallet = Keypair.fromSecretKey(bs58.decode(SOLANA_PRIVATE_KEY));
 
-// Create a Solana connection to Devnet
-const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
+// Create a Solana connection to Mainnet Beta
+const connection = new Connection(clusterApiUrl("mainnet-beta"), "confirmed");
 
 //creating solanawalletclient
 class SolanaWalletClientImpl implements SolanaWalletClient {
