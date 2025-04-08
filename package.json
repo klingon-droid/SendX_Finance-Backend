@@ -6,8 +6,10 @@
   "scripts": {
     "test": "vitest run --passWithNoTests",
     "build": "tsc",
-    "start": "node samplebot.js",
-    "dev": "node samplebot.js"
+    "start": "node dist/samplebot.js",
+    "dev": "ts-node samplebot.ts",
+    "clean": "rm -rf dist",
+    "prebuild": "npm run clean"
   },
   "author": "",
   "license": "MIT",
