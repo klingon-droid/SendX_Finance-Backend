@@ -1,14 +1,14 @@
-# SendX Backend
+# AeroSol Backend
 
 ## Overview
 
-SendX is a Twitter-powered Solana payment solution that allows users to send SOL to any Twitter user through simple tweets. The backend consists of a Twitter bot that monitors mentions, processes payment requests, and executes Solana transactions on the mainnet-beta.
+AeroSol is a Twitter-powered Solana payment solution that allows users to send SOL to any Twitter user through simple tweets. The backend consists of a Twitter bot that monitors mentions, processes payment requests, and executes Solana transactions on the mainnet-beta.
 
-![SendX Logo](https://i.imgur.com/placeholder-for-logo.png)
+![AeroSol Logo](https://i.imgur.com/placeholder-for-logo.png)
 
 ## Features
 
-- **Twitter-Based Payments**: Send SOL to any Twitter user by mentioning `@SendX_Finance`
+- **Twitter-Based Payments**: Send SOL to any Twitter user by mentioning `@AeroSol_Finance`
 - **Automatic Wallet Creation**: Recipients don't need a pre-existing Solana wallet
 - **Natural Language Processing**: AI-powered extraction of payment details from tweets
 - **Transaction Verification**: Automatic reply with Solscan transaction link
@@ -16,7 +16,7 @@ SendX is a Twitter-powered Solana payment solution that allows users to send SOL
 
 ## Architecture
 
-The SendX backend consists of several key components:
+The AeroSol backend consists of several key components:
 
 1. **Twitter Bot**: Monitors mentions and processes payment requests
 2. **Solana Integration**: Executes transactions on the Solana mainnet-beta
@@ -76,15 +76,15 @@ npm start
 
 ## Usage Flow
 
-1. **User Registration**: Users register on the SendX platform (https://sendx-pi.vercel.app)
-2. **Deposit Funds**: Users deposit SOL into their SendX account
-3. **Send Payment**: Users tweet `@SendX_Finance send [amount] SOL to @recipient`
+1. **User Registration**: Users register on the AeroSol platform (https://sendx-pi.vercel.app)
+2. **Deposit Funds**: Users deposit SOL into their AeroSol account
+3. **Send Payment**: Users tweet `@AeroSol_Finance send [amount] SOL to @recipient`
 4. **Processing**: The bot processes the request and executes the Solana transaction
 5. **Confirmation**: The bot replies with a transaction link
 
 ## API Integration
 
-The backend integrates with the SendX frontend API:
+The backend integrates with the AeroSol frontend API:
 
 - `GET /api/userBalance?username={username}`: Retrieve user balance
 - `POST /api/userBalance`: Update user balance

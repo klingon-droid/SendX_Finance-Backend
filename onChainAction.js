@@ -46,8 +46,8 @@ require("dotenv").config();
 var SOLANA_PRIVATE_KEY = process.env.SOLANA_PRIVATE_KEY;
 // Create a Solana wallet
 var fundingWallet = web3_js_1.Keypair.fromSecretKey(bs58_1.default.decode(SOLANA_PRIVATE_KEY));
-// Create a Solana connection to Devnet
-var connection = new web3_js_1.Connection((0, web3_js_1.clusterApiUrl)("devnet"), "confirmed");
+// Create a Solana connection to Mainnet Beta
+var connection = new web3_js_1.Connection((0, web3_js_1.clusterApiUrl)("mainnet-beta"), "confirmed");
 //creating solanawalletclient
 var SolanaWalletClientImpl = /** @class */ (function () {
     function SolanaWalletClientImpl(wallet, connection) {
