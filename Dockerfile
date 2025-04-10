@@ -12,11 +12,11 @@ RUN npm ci
 # Copy the rest of the application
 COPY . .
 
-# Create dist directory
-RUN mkdir -p dist
-
 # Build TypeScript files
 RUN npm run build
 
-# Start the application from the dist directory
-CMD ["node", "dist/samplebot.js"] 
+# Remove development dependencies
+RUN npm prune --production
+
+# Start the application
+CMD ["node", "dist/server.js"] 
