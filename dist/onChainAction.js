@@ -12,7 +12,7 @@ const web3_js_3 = require("@solana/web3.js");
 require("dotenv").config();
 const SOLANA_PRIVATE_KEY = process.env.SOLANA_PRIVATE_KEY;
 const fundingWallet = web3_js_1.Keypair.fromSecretKey(bs58_1.default.decode(SOLANA_PRIVATE_KEY));
-const connection = new web3_js_1.Connection((0, web3_js_1.clusterApiUrl)("mainnet-beta"), "confirmed");
+const connection = new web3_js_1.Connection((0, web3_js_1.clusterApiUrl)("devnet"), "confirmed");
 class SolanaWalletClientImpl {
     constructor(wallet, connection) {
         this.wallet = wallet;

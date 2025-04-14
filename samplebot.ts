@@ -11,8 +11,10 @@ import axios from 'axios';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { connectToDatabase } from './mongodb';
+import { getUserBalance, updateUserBalance } from './pages/api/userBalanceRoutes';
 import { LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction, clusterApiUrl, Connection, Keypair } from '@solana/web3.js';
 import bs58 from 'bs58';
+
 
 // --- Global Error Handlers (Add these VERY FIRST) ---
 process.on('uncaughtException', (err, origin) => {
@@ -204,8 +206,8 @@ async function withdrawHandler(req: Request, res: Response) {
       console.log('[withdrawHandler] Provided wallet address matches Privy wallet.');
 
       // --- Step 5: Solana Transaction Logic (largely unchanged) ---
-      console.log('[withdrawHandler] Connecting to Solana mainnet-beta...');
-      const connection = new Connection(clusterApiUrl("mainnet-beta"), "confirmed");
+      console.log('[withdrawHandler] Connecting to Solana devnet...');
+      const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
       console.log('[withdrawHandler] Solana connection established.'); // Log after Solana connection
   
       // --- Start of inner try block for Solana interaction ---
@@ -290,6 +292,8 @@ async function withdrawHandler(req: Request, res: Response) {
     }
 }
 
+
+
 app.post('/api/withdraw', async (req: Request, res: Response) => {
   console.log('[POST /api/withdraw] Route handler entered.'); // Log route entry
   try {
@@ -303,6 +307,78 @@ app.post('/api/withdraw', async (req: Request, res: Response) => {
     res.status(500).json({
       message: 'Internal server error in route',
       error: error instanceof Error ? error.message : 'An unexpected error occurred in route'
+    });
+  }
+});
+
+// @ts-ignore - TypeScript error workaround
+app.get('/api/userBalance', async (req, res) => {
+  try {
+    const { username } = req.query;
+    if (!username) {
+      return res.status(400).json({ 
+        message: 'Missing username',
+        error: 'Username parameter is required'
+      });
+    }
+    
+    const { db } = await connectToDatabase();
+    const usersCollection = db.collection('users');
+    const user = await usersCollection.findOne({ username });
+    
+    if (!user) {
+      return res.status(404).json({ 
+        message: 'User not found',
+        data: null
+      });
+    }
+    
+    return res.status(200).json({
+      message: 'User balance found',
+      data: {
+        balance: user.balance || 0
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching user balance:', error);
+    return res.status(500).json({ 
+      message: 'Internal server error',
+      error: error instanceof Error ? error.message : 'An unexpected error occurred'
+    });
+  }
+});
+
+// @ts-ignore - TypeScript error workaround
+app.post('/api/userBalance', async (req, res) => {
+  try {
+    const { username, balance } = req.body;
+    
+    if (!username || balance === undefined) {
+      return res.status(400).json({ 
+        message: 'Missing required fields',
+        error: 'Username and balance are required'
+      });
+    }
+    
+    const { db } = await connectToDatabase();
+    const usersCollection = db.collection('users');
+    
+    // Update user if exists, or create new user
+    const result = await usersCollection.updateOne(
+      { username },
+      { $set: { balance } },
+      { upsert: true }
+    );
+    
+    return res.status(200).json({
+      message: result.upsertedCount ? 'User created with balance' : 'User balance updated',
+      data: { username, balance }
+    });
+  } catch (error) {
+    console.error('Error updating user balance:', error);
+    return res.status(500).json({ 
+      message: 'Internal server error',
+      error: error instanceof Error ? error.message : 'An unexpected error occurred'
     });
   }
 });
@@ -329,6 +405,7 @@ async function replyToTweet(
             await scraper.sendTweet(`@${sender} Please register first.`, tweet.id);
             return;
         }
+        
         const balance = senderinfo.data.data.balance;
 
         const result = await getUsername(tweetText, llm, scraper, tweet.id);
@@ -437,7 +514,8 @@ async function main(scraper: Scraper, privyClient: PrivyClient, llm: ChatGroq | 
             20,
             SearchMode.Latest
         );
-        console.log(`Found ${getTweets.tweets.length} tweets.`);
+        console.log(`seen ${getTweets.tweets.length} tweets.`);
+
 
         const formattedTweets = getTweets.tweets.map((tweet: any): Tweet => ({
             id: tweet.id_str || tweet.id,
@@ -452,7 +530,8 @@ async function main(scraper: Scraper, privyClient: PrivyClient, llm: ChatGroq | 
             isReply: !!tweet.in_reply_to_status_id_str || tweet.isReply || false,
             isRetweet: !!tweet.retweeted_status || tweet.isRetweet || false,
             isPin: tweet.user?.pinned_tweet_ids_str?.includes(tweet.id_str) || tweet.isPin || false,
-            timeParsed: new Date(tweet.created_at).toISOString(),
+            // timeParsed: new Date(tweet.created_at).toISOString(),
+            timeParsed: tweet.created_at ? new Date(tweet.created_at).toISOString() : new Date().toISOString(),
             timestamp: new Date(tweet.created_at).getTime() / 1000,
             html: tweet.html || ''
         }));
@@ -581,6 +660,8 @@ SERVER LISTENER ERROR on port ${port}
 
     console.log('[Start Function] Listener setup initiated (waiting for success/error).'); // Log after initiating listen
 }
+// app.get('/api/userBalance', getUserBalance);
+// app.post('/api/userBalance', updateUserBalance);
 
 // Ensure the global error handler is defined AFTER all routes and middleware
 app.use((err: Error, req: express.Request, res: express.Response, next: NextFunction) => {
