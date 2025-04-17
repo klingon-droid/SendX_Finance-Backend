@@ -11,9 +11,12 @@ import axios from 'axios';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { connectToDatabase } from './mongodb';
+import { v4 as uuidv4 } from 'uuid';
 import { getUserBalance, updateUserBalance } from './pages/api/userBalanceRoutes';
 import { LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction, clusterApiUrl, Connection, Keypair } from '@solana/web3.js';
 import bs58 from 'bs58';
+
+dotenv.config();
 
 
 // --- Global Error Handlers (Add these VERY FIRST) ---
@@ -45,7 +48,7 @@ Reason:`, reason);
 dotenv.config();
 
 const app = express();
-console.log('[Server Setup] Express app initialized.'); // Log after app creation
+console.log('[Server Setup] Express app initialized.'); 
 
 const port = process.env.PORT || 3005;
 
@@ -54,7 +57,7 @@ app.use(cors({
   credentials: true
 }));
 
-// Add a log *before* body parsing to see if requests hit the server at all
+
 app.use((req, res, next) => {
   if (req.path === '/api/withdraw') {
     console.log(`[Middleware Logger] Received request: ${req.method} ${req.path}`);
@@ -65,8 +68,7 @@ app.use((req, res, next) => {
 app.use(express.json());
 
 // Explicitly handle OPTIONS requests for the withdraw endpoint BEFORE the POST handler
-app.options('/api/withdraw', cors()); // Enable CORS preflight for this route
-
+app.options('/api/withdraw', cors()); 
 interface Tweet {
     id: string;
     conversationId: string;
@@ -109,13 +111,13 @@ const redis = new Redis({
 
 const LAST_REPLIED_TWEET_KEY = 'lastRepliedTweetId';
 
-async function loadLastRepliedTweetId(): Promise<string | null> {
-    return await redis.get(LAST_REPLIED_TWEET_KEY);
-}
+// async function loadLastRepliedTweetId(): Promise<string | null> {
+//     return await redis.get(LAST_REPLIED_TWEET_KEY);
+// }
 
-async function saveLastRepliedTweetId(tweetId: string): Promise<void> {
-    await redis.set(LAST_REPLIED_TWEET_KEY, tweetId);
-}
+// async function saveLastRepliedTweetId(tweetId: string): Promise<void> {
+//     await redis.set(LAST_REPLIED_TWEET_KEY, tweetId);
+// }
 
 async function withdrawHandler(req: Request, res: Response) {
     console.log('[withdrawHandler] Entered function.'); // Log entry
@@ -387,208 +389,582 @@ app.get('/health', (req: express.Request, res: express.Response) => {
     res.json({ status: 'ok' });
 });
 
+// Modified replyToTweet function to generate approval links
 async function replyToTweet(
-    scraper: Scraper,
-    tweet: Tweet,
-    privyClient: PrivyClient,
-    llm: ChatGroq | Ollama
+  scraper: Scraper,
+  tweet: Tweet,
+  privyClient: PrivyClient,
+  llm: ChatGroq | Ollama
 ): Promise<void> {
-    try {
-        const tweetText = tweet.text;
-        const sender = tweet.username;
+  try {
+    console.log(tweet);
+    const tweetText = tweet.text;
+    const sender = tweet.username;
+    const myUsername = process.env.MY_USERNAME;
 
-        const backendApiBaseUrl = process.env.BACKEND_API_URL || `http://localhost:${port}`;
-        const senderinfo = await axios.get<UserBalance>(`${backendApiBaseUrl}/api/userBalance?username=${sender}`);
-        
-        if (senderinfo.data.data === null) {
-            console.log("User not found");
-            await scraper.sendTweet(`@${sender} Please register first.`, tweet.id);
-            return;
-        }
-        
-        const balance = senderinfo.data.data.balance;
-
-        const result = await getUsername(tweetText, llm, scraper, tweet.id);
-        if (!result) {
-            console.log("Could not parse username and amount");
-            return;
-        }
-        
-        const { username: recipientUsername, amount } = result;
-        console.log('Recipient Username:', recipientUsername);
-        console.log('Amount:', amount);
-
-        if (balance < amount) {
-            console.log("Deposited funds are insufficient");
-            await scraper.sendTweet(`@${sender} Deposited funds are insufficient`, tweet.id);
-            return;
-        }
-
-        let user = await privyClient.getUserByTwitterUsername(recipientUsername);
-        let isNewUser = false;
-        if (!user) {
-            console.log('Recipient user not found on Privy, attempting to import:', recipientUsername);
-            const userDetails = await scraper.getProfile(recipientUsername) as UserProfile;
-            if (!userDetails?.userId || !userDetails?.username) {
-                console.log('Could not fetch recipient details from Twitter');
-                await scraper.sendTweet(`@${sender} Could not fetch recipient details for @${recipientUsername}`, tweet.id);
-                return;
-            }
-            console.log('Recipient Twitter details:', userDetails);
-            try {
-                user = await privyClient.importUser({
-                    linkedAccounts: [
-                        {
-                            type: 'twitter_oauth',
-                            subject: userDetails.userId,
-                            name: userDetails.name || null,
-                            username: userDetails.username || null,
-                        },
-                    ],
-                    createSolanaWallet: true,
-                    customMetadata: {
-                        username: userDetails.username
-                    },
-                });
-                isNewUser = true;
-                console.log('Successfully imported recipient user to Privy:', recipientUsername);
-            } catch (importError) {
-                console.error('Error importing recipient user to Privy:', importError);
-                await scraper.sendTweet(`@${sender} Error setting up recipient @${recipientUsername}`, tweet.id);
-                return;
-            }
-        }
-
-        if (!user?.wallet?.address) {
-            console.log('Recipient user wallet not found (Privy):', recipientUsername);
-            await scraper.sendTweet(`@${sender} Could not find or create recipient wallet for @${recipientUsername}`, tweet.id);
-            return;
-        }
-
-        console.log(`Recipient wallet address: ${user.wallet.address}`);
-        if (isNewUser) {
-            console.log("Waiting for 10 seconds for wallet creation propagation...");
-            await new Promise(resolve => setTimeout(resolve, 10000));
-            console.log("10 seconds passed");
-        } else {
-            console.log("Waiting for 5 seconds before sending funds...");
-            await new Promise(resolve => setTimeout(resolve, 5000));
-            console.log("5 seconds passed");
-        }
-
-        const signature = await onchainAction(user.wallet.address, amount);
-        console.log(`Transaction signature: ${signature}`);
-        
-        await axios.post(`${backendApiBaseUrl}/api/userBalance`, {
-            username: sender,
-            balance: balance - amount,
-        });
-        console.log(`Updated balance for sender: ${sender}`);
-
-        const solscanUrl = `https://solscan.io/tx/${signature}`;
-        console.log(`Replying to tweet ID: ${tweet.id} with Solscan link: ${solscanUrl}`);
-        await scraper.sendTweet(`@${sender} Sent ${amount} SOL to @${recipientUsername}. Tx: ${solscanUrl}`, tweet.id);
-        console.log('Replied to tweet ID:', tweet.id);
-
-    } catch (error) {
-        console.error('Error in replyToTweet function for tweet ID:', tweet.id, error);
-        try {
-             await scraper.sendTweet(`@${tweet.username} Sorry, an error occurred processing your request.`, tweet.id);
-        } catch (sendError) {
-             console.error('Failed to send error message tweet:', sendError);
-        }
+    // IMPORTANT: Skip processing if the sender is the bot itself
+    if (sender.toLowerCase() === myUsername?.toLowerCase()) {
+      console.log(`Skipping tweet ${tweet.id} because it's from our own bot`);
+      return;
     }
+
+    // Skip if it's a retweet or quote - only process direct mentions
+    if (tweet.isRetweet || tweet.isQuoted) {
+      console.log(`Skipping tweet ${tweet.id} because it's a retweet or quote`);
+      return;
+    }
+
+    // Parse tweet to get recipient and amount
+    const result = await getUsername(tweetText, llm, scraper, tweet.id);
+    if (!result) {
+      console.log("Could not parse username and amount");
+      await scraper.sendTweet(`@${sender} Please format your request as "@${myUsername} send 0.1 to @recipient"`, tweet.id);
+      return;
+    }
+      
+    const { username: recipientUsername, amount } = result;
+    console.log('Recipient Username:', recipientUsername);
+    console.log('Amount:', amount);
+
+    // Additional validation to avoid loops: Don't process if recipient is the bot itself
+    if (recipientUsername.toLowerCase() === myUsername?.toLowerCase()) {
+      console.log(`Skipping tweet ${tweet.id} because recipient is our own bot`);
+      await scraper.sendTweet(`@${sender} I cannot send SOL to myself. Please specify a different recipient.`, tweet.id);
+      return;
+    }
+
+    // Check if recipient exists and has a wallet
+    let recipientUser = await privyClient.getUserByTwitterUsername(recipientUsername);
+    let isNewUser = false;
+      
+    // If recipient doesn't exist, import them
+    if (!recipientUser) {
+      console.log('Recipient user not found on Privy, attempting to import:', recipientUsername);
+      const userDetails = await scraper.getProfile(recipientUsername) as UserProfile;
+      if (!userDetails?.userId || !userDetails?.username) {
+        console.log('Could not fetch recipient details from Twitter');
+        await scraper.sendTweet(`@${sender} Could not fetch details for @${recipientUsername}`, tweet.id);
+        return;
+      }
+          
+      try {
+        recipientUser = await privyClient.importUser({
+          linkedAccounts: [
+            {
+              type: 'twitter_oauth',
+              subject: userDetails.userId,
+              name: userDetails.name || null,
+              username: userDetails.username || null,
+            }
+          ],
+          createSolanaWallet: true,
+          customMetadata: {
+            username: userDetails.username
+          }
+        });
+        isNewUser = true;
+        console.log('Successfully imported recipient user to Privy:', recipientUsername);
+      } catch (importError) {
+        console.error('Error importing recipient user to Privy:', importError);
+        await scraper.sendTweet(`@${sender} Error setting up recipient @${recipientUsername}`, tweet.id);
+        return;
+      }
+    }
+
+    if (!recipientUser?.wallet?.address) {
+      console.log('Recipient user wallet not found (Privy):', recipientUsername);
+      await scraper.sendTweet(`@${sender} Could not find or create wallet for @${recipientUsername}`, tweet.id);
+      return;
+    }
+
+    // Generate a unique transaction ID
+    const transactionId = uuidv4();
+      
+    // Store the transaction intent
+    const { db } = await connectToDatabase();
+    const transactionsCollection = db.collection('transactions');
+
+    console.log(sender, recipientUsername);
+      
+    await transactionsCollection.insertOne({
+      id: transactionId,
+      tweetId: tweet.id,
+      sender: sender,
+      recipient: recipientUsername,
+      recipientAddress: recipientUser.wallet.address,
+      amount: amount,
+      status: 'pending',
+      createdAt: new Date(),
+      // Set expiry time - transactions expire after 24 hours
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) 
+    });
+      
+    // Create an approval link
+    const approvalUrl = `${process.env.FRONTEND_URL}/approve/${transactionId}`;
+      
+    // Reply with the approval link
+    await scraper.sendTweet(
+      `@${sender} Ready to send ${amount} SOL to @${recipientUsername}. ` +
+      `Click here to approve this transaction: ${approvalUrl} ` +
+      `(Link expires in 24 hours)`, 
+      tweet.id
+    );
+      
+    console.log(`Created transaction intent ${transactionId} for ${sender} to send ${amount} SOL to ${recipientUsername}`);
+  } catch (error) {
+    console.error('Error in replyToTweet function for tweet ID:', tweet.id, error);
+    try {
+      await scraper.sendTweet(`@${tweet.username} Sorry, an error occurred processing your request.`, tweet.id);
+    } catch (sendError) {
+      console.error('Failed to send error message tweet:', sendError);
+    }
+  }
 }
 
-async function main(scraper: Scraper, privyClient: PrivyClient, llm: ChatGroq | Ollama): Promise<void> {
+// Add the transaction API endpoints inline
+app.get('/api/transactions/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    if (!id) {
+      res.status(400).json({ success: false, error: 'Transaction ID is required' });
+      return;
+    }
+    
+    const { db } = await connectToDatabase();
+    const transactionsCollection = db.collection('transactions');
+    
+    const transaction = await transactionsCollection.findOne({ id });
+    
+    if (!transaction) {
+      res.status(404).json({ success: false, error: 'Transaction not found' });
+      return;
+    }
+    
+    // Check if transaction has expired
+    if (transaction.expiresAt && new Date() > new Date(transaction.expiresAt)) {
+      res.status(410).json({ success: false, error: 'Transaction has expired' });
+      return;
+    }
+    
+    res.status(200).json({
+      success: true,
+      transaction: {
+        id: transaction.id,
+        sender: transaction.sender,
+        recipient: transaction.recipient,
+        recipientAddress: transaction.recipientAddress,
+        amount: transaction.amount,
+        status: transaction.status
+      }
+    });
+  } catch (error) {
+    console.error('Error getting transaction details:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error instanceof Error ? error.message : 'An unexpected error occurred' 
+    });
+  }
+});
+
+app.post('/api/transactions/complete', async (req, res) => {
+  try {
+    const { id, signature, senderAddress } = req.body;
+    
+    if (!id || !signature || !senderAddress) {
+      res.status(400).json({ 
+        success: false, 
+        error: 'Transaction ID, signature, and sender address are required' 
+      });
+      return;
+    }
+    
+    const { db } = await connectToDatabase();
+    const transactionsCollection = db.collection('transactions');
+    
+    const transaction = await transactionsCollection.findOne({ id });
+    
+    if (!transaction) {
+      res.status(404).json({ success: false, error: 'Transaction not found' });
+      return;
+    }
+    
+    if (transaction.status !== 'pending') {
+      res.status(400).json({ success: false, error: 'Transaction is no longer pending' });
+      return;
+    }
+    
+    // Check if transaction has expired
+    if (transaction.expiresAt && new Date() > new Date(transaction.expiresAt)) {
+      res.status(410).json({ success: false, error: 'Transaction has expired' });
+      return;
+    }
+    
+    // Update transaction status
+    await transactionsCollection.updateOne(
+      { id },
+      { 
+        $set: { 
+          status: 'completed', 
+          signature, 
+          senderAddress,
+          completedAt: new Date() 
+        }
+      }
+    );
+    
+    // Send confirmation tweet
     try {
-        const myUsername = process.env.MY_USERNAME;
-        if (!myUsername) {
-             console.error("MY_USERNAME environment variable not set!");
-             return;
+      const scraper = new Scraper();
+      await scraper.login(
+        process.env.MY_USERNAME || '',
+        process.env.PASSWORD || '',
+        process.env.EMAIL || ''
+      );
+      
+      const solscanUrl = `https://solscan.io/tx/${signature}`;
+      await scraper.sendTweet(
+        `@${transaction.sender} You've successfully sent ${transaction.amount} SOL to @${transaction.recipient}. ` +
+        `Tx: ${solscanUrl}`, 
+        transaction.tweetId
+      );
+    } catch (twitterError) {
+      console.error('Error sending confirmation tweet:', twitterError);
+      // Continue even if Twitter notification fails
+    }
+    
+    res.status(200).json({ 
+      success: true,
+      message: 'Transaction completed successfully',
+      data: {
+        signature,
+        solscanUrl: `https://solscan.io/tx/${signature}`
+      }
+    });
+  } catch (error) {
+    console.error('Error completing transaction:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'An unexpected error occurred'
+    });
+  }
+});
+
+
+
+async function main(scraper: Scraper, privyClient: PrivyClient, llm: ChatGroq | Ollama): Promise<void> {
+  try {
+    const myUsername = process.env.MY_USERNAME;
+    if (!myUsername) {
+      console.error("MY_USERNAME environment variable not set!");
+      return;
+    }
+        
+    console.log(`Fetching tweets mentioning @${myUsername}...`);
+    const getTweets = await scraper.fetchSearchTweets(
+      `@${myUsername}`,
+      20,
+      SearchMode.Latest
+    );
+    console.log(`Seen ${getTweets.tweets.length} tweets.`);
+
+    const formattedTweets = getTweets.tweets.map((tweet: any): Tweet => ({
+      id: tweet.id_str || tweet.id,
+      conversationId: tweet.conversation_id_str || tweet.conversationId,
+      mentions: tweet.entities?.user_mentions?.map((m: any) => m.screen_name) || tweet.mentions || [],
+      name: tweet.user?.name || tweet.name,
+      permanentUrl: `https://twitter.com/${tweet.user?.screen_name || tweet.username}/status/${tweet.id_str || tweet.id}`,
+      text: tweet.full_text || tweet.text,
+      userId: tweet.user?.id_str || tweet.userId,
+      username: tweet.user?.screen_name || tweet.username,
+      isQuoted: tweet.is_quote_status || tweet.isQuoted || false,
+      isReply: !!tweet.in_reply_to_status_id_str || tweet.isReply || false,
+      isRetweet: !!tweet.retweeted_status || tweet.isRetweet || false,
+      isPin: tweet.user?.pinned_tweet_ids_str?.includes(tweet.id_str) || tweet.isPin || false,
+      timeParsed: tweet.created_at ? new Date(tweet.created_at).toISOString() : new Date().toISOString(),
+      timestamp: tweet.created_at ? new Date(tweet.created_at).getTime() / 1000 : Date.now() / 1000,
+      html: tweet.html || ''
+    }));
+
+    if (formattedTweets.length > 0) {
+      const lastRepliedTweetId = await loadLastRepliedTweetId();
+      console.log('Last replied tweet ID from Redis:', lastRepliedTweetId);
+
+      const lastRepliedTweetIdNum = lastRepliedTweetId ? BigInt(lastRepliedTweetId) : BigInt(0);
+      let latestProcessedTweetId = lastRepliedTweetIdNum;
+
+      // Sort tweets by timestamp (oldest first) for proper processing order
+      formattedTweets.sort((a, b) => a.timestamp - b.timestamp);
+      
+      // First track all seen tweets to update our ID marker even if we don't reply
+      for (const tweet of formattedTweets) {
+        const tweetIdNum = BigInt(tweet.id);
+        if (tweetIdNum > latestProcessedTweetId) {
+          latestProcessedTweetId = tweetIdNum;
+        }
+      }
+
+      // Create a set of tweets we've already processed to avoid duplicates
+      // in case the Twitter API returns the same tweet twice
+      const processedTweetIds = new Set<string>();
+
+      for (const tweet of formattedTweets) {
+        const tweetIdNum = BigInt(tweet.id);
+        console.log(`Processing tweet ID: ${tweet.id} (Num: ${tweetIdNum})`);
+        
+        // Skip if this tweet has already been processed in this batch
+        if (processedTweetIds.has(tweet.id)) {
+          console.log(`Tweet ${tweet.id} was already processed in this batch, skipping.`);
+          continue;
         }
         
-        console.log(`Fetching tweets mentioning @${myUsername}...`);
-        const getTweets = await scraper.fetchSearchTweets(
-            `@${myUsername}`,
-            20,
-            SearchMode.Latest
-        );
-        console.log(`seen ${getTweets.tweets.length} tweets.`);
-
-
-        const formattedTweets = getTweets.tweets.map((tweet: any): Tweet => ({
-            id: tweet.id_str || tweet.id,
-            conversationId: tweet.conversation_id_str || tweet.conversationId,
-            mentions: tweet.entities?.user_mentions?.map((m: any) => m.screen_name) || tweet.mentions || [],
-            name: tweet.user?.name || tweet.name,
-            permanentUrl: `https://twitter.com/${tweet.user?.screen_name || tweet.username}/status/${tweet.id_str || tweet.id}`,
-            text: tweet.full_text || tweet.text,
-            userId: tweet.user?.id_str || tweet.userId,
-            username: tweet.user?.screen_name || tweet.username,
-            isQuoted: tweet.is_quote_status || tweet.isQuoted || false,
-            isReply: !!tweet.in_reply_to_status_id_str || tweet.isReply || false,
-            isRetweet: !!tweet.retweeted_status || tweet.isRetweet || false,
-            isPin: tweet.user?.pinned_tweet_ids_str?.includes(tweet.id_str) || tweet.isPin || false,
-            // timeParsed: new Date(tweet.created_at).toISOString(),
-            timeParsed: tweet.created_at ? new Date(tweet.created_at).toISOString() : new Date().toISOString(),
-            timestamp: new Date(tweet.created_at).getTime() / 1000,
-            html: tweet.html || ''
-        }));
-
-        if (formattedTweets.length > 0) {
-            const lastRepliedTweetId = await loadLastRepliedTweetId();
-            console.log('Last replied tweet ID from Redis:', lastRepliedTweetId);
-
-            const lastRepliedTweetIdNum = lastRepliedTweetId ? BigInt(lastRepliedTweetId) : BigInt(0);
-            let latestProcessedTweetId = lastRepliedTweetIdNum;
-
-            formattedTweets.sort((a, b) => a.timestamp - b.timestamp);
-
-            for (const tweet of formattedTweets) {
-                const tweetIdNum = BigInt(tweet.id);
-                console.log(`Processing tweet ID: ${tweet.id} (Num: ${tweetIdNum})`);
-
-                if (tweetIdNum > lastRepliedTweetIdNum) {
-                    if (tweet.text.includes(`@${myUsername}`)) {
-                        console.log(`Tweet ${tweet.id} is a direct mention. Replying...`);
-                        try {
-                            await replyToTweet(scraper, tweet, privyClient, llm);
-                            console.log('Successfully processed and replied to tweet ID:', tweet.id);
-                            if (tweetIdNum > latestProcessedTweetId) {
-                                latestProcessedTweetId = tweetIdNum;
-                            }
-                        } catch (replyError) {
-                            console.error('Error replying to tweet ID:', tweet.id, replyError);
-                        }
-                    } else {
-                        console.log(`Tweet ${tweet.id} does not directly mention @${myUsername} in text, skipping reply.`);
-                        if (tweetIdNum > latestProcessedTweetId) {
-                            latestProcessedTweetId = tweetIdNum;
-                        }
-                    }
-                } else {
-                    console.log(`Tweet ID ${tweet.id} is older than or same as last replied (${lastRepliedTweetId}), skipping.`);
-                }
-            }
-            
-            if (latestProcessedTweetId > lastRepliedTweetIdNum) {
-                 console.log(`Updating last replied tweet ID in Redis to: ${latestProcessedTweetId.toString()}`);
-                 await saveLastRepliedTweetId(latestProcessedTweetId.toString());
-            } else {
-                 console.log("No new tweets processed in this batch requiring update to last replied ID.");
-            }
-            
-        } else {
-            console.log('No new mention tweets found in this batch.');
+        // Skip tweets from the bot itself to prevent infinite loops
+        if (tweet.username.toLowerCase() === myUsername.toLowerCase()) {
+          console.log(`Tweet ${tweet.id} is from our own bot, skipping.`);
+          processedTweetIds.add(tweet.id);
+          continue;
         }
-    } catch (error) {
-        console.error('Error in main function:', error);
+
+        if (tweetIdNum > lastRepliedTweetIdNum) {
+          // Only process if it's a direct mention and not a retweet/quote
+          if (tweet.text.toLowerCase().includes(`@${myUsername.toLowerCase()}`) && 
+              !tweet.isRetweet && 
+              !tweet.isQuoted) {
+            console.log(`Tweet ${tweet.id} is a valid mention. Replying...`);
+            try {
+              await replyToTweet(scraper, tweet, privyClient, llm);
+              console.log('Successfully processed and replied to tweet ID:', tweet.id);
+              processedTweetIds.add(tweet.id);
+            } catch (replyError) {
+              console.error('Error replying to tweet ID:', tweet.id, replyError);
+            }
+          } else {
+            console.log(`Tweet ${tweet.id} does not qualify for a reply (retweet, quote, or not direct mention).`);
+            processedTweetIds.add(tweet.id);
+          }
+        } else {
+          console.log(`Tweet ID ${tweet.id} is older than or same as last replied (${lastRepliedTweetId}), skipping.`);
+          processedTweetIds.add(tweet.id);
+        }
+      }
+            
+      // Always update the latest processed tweet ID, even if we didn't reply to any
+      if (latestProcessedTweetId > lastRepliedTweetIdNum) {
+        console.log(`Updating last replied tweet ID in Redis to: ${latestProcessedTweetId.toString()}`);
+        await saveLastRepliedTweetId(latestProcessedTweetId.toString());
+      } else {
+        console.log("No new tweets processed in this batch requiring update to last replied ID.");
+      }
+    } else {
+      console.log('No new mention tweets found in this batch.');
     }
+  } catch (error) {
+    console.error('Error in main function:', error);
+  }
+}
+
+// Improved Redis functions for better reliability
+async function loadLastRepliedTweetId(): Promise<string | null> {
+  try {
+    return await redis.get(LAST_REPLIED_TWEET_KEY);
+  } catch (error) {
+    console.error("Error loading last replied tweet ID from Redis:", error);
+    return null; // Return null on error rather than crashing
+  }
+}
+
+async function saveLastRepliedTweetId(tweetId: string): Promise<void> {
+  try {
+    await redis.set(LAST_REPLIED_TWEET_KEY, tweetId);
+    console.log(`Successfully saved tweet ID ${tweetId} to Redis`);
+  } catch (error) {
+    console.error("Error saving last replied tweet ID to Redis:", error);
+    // Continue execution even if Redis write fails
+  }
+}
+
+async function loginWithRetry(
+  maxRetries: number = 3,
+  delayBetweenRetries: number = 10000 // 10 seconds
+): Promise<Scraper | null> {
+  let retryCount = 0;
+  
+  while (retryCount < maxRetries) {
+    try {
+      console.log(`Twitter login attempt ${retryCount + 1}/${maxRetries}...`);
+      const scraper = new Scraper();
+      
+      await scraper.login(
+        process.env.MY_USERNAME || '',
+        process.env.PASSWORD || '',
+        process.env.EMAIL || ''
+      );
+      
+      console.log('Twitter login successful!');
+      return scraper;
+    } catch (error) {
+      retryCount++;
+      console.error(`Twitter login failed (attempt ${retryCount}/${maxRetries}):`, error);
+      
+      if (retryCount >= maxRetries) {
+        console.error(`All ${maxRetries} login attempts failed. Twitter functionality will be disabled.`);
+        return null;
+      }
+      
+      console.log(`Waiting ${delayBetweenRetries/1000} seconds before retrying...`);
+      await new Promise(resolve => setTimeout(resolve, delayBetweenRetries));
+    }
+  }
+  
+  return null;
+}
+
+function validateEnvironmentVariables(): boolean {
+  const requiredVars = [
+    'MY_USERNAME',
+    'PASSWORD',
+    'EMAIL',
+    'PRIVY_CLIENT_ID',
+    'PRIVY_CLIENT_SECRET',
+    'GROQ_API_KEY',
+    'REDIS_HOST',
+    'REDIS_PORT',
+    'FRONTEND_URL'
+  ];
+  
+  let allValid = true;
+  const missing: string[] = [];
+  
+  requiredVars.forEach(varName => {
+    if (!process.env[varName]) {
+      missing.push(varName);
+      allValid = false;
+    }
+  });
+  
+  if (!allValid) {
+    console.error(`
+=================================================
+MISSING ENVIRONMENT VARIABLES
+=================================================
+The following required variables are missing:
+${missing.map(v => `- ${v}`).join('\n')}
+
+Please check your .env file and make sure all required
+variables are set correctly.
+=================================================
+`);
+  } else {
+    console.log('✅ All required environment variables are set.');
+  }
+  
+  return allValid;
+}
+
+// Twitter credentials validation function - test the login without trying to use it
+async function validateTwitterCredentials(): Promise<boolean> {
+  console.log('Testing Twitter credentials...');
+  
+  try {
+    const scraper = new Scraper();
+    
+    await scraper.login(
+      process.env.MY_USERNAME || '',
+      process.env.PASSWORD || '',
+      process.env.EMAIL || ''
+    );
+    
+    console.log('✅ Twitter credentials are valid.');
+    return true;
+  } catch (error) {
+    console.error('❌ Twitter credentials validation failed:');
+    
+    const errorString = String(error);
+    
+    // Try to provide more helpful error messages based on the error pattern
+    if (errorString.includes('399')) {
+      console.error(`
+Twitter returned a 399 error, which typically means incorrect username or password.
+Please double-check your MY_USERNAME, PASSWORD, and EMAIL environment variables.
+
+Common issues:
+1. Password may be incorrect or recently changed
+2. Twitter may be requiring a CAPTCHA or additional verification
+3. The account may be locked due to suspicious activity
+
+You may need to log in manually on twitter.com first to clear any verification requirements.
+`);
+    } else if (errorString.includes('401')) {
+      console.error(`
+Twitter returned a 401 error, which indicates unauthorized access.
+Please verify that your credentials are correct and that your account isn't restricted.
+`);
+    } else if (errorString.includes('rate limit')) {
+      console.error(`
+Twitter is rate limiting your requests. This may be because:
+1. Too many login attempts in a short period
+2. The IP address you're using is shared/blocked
+3. Twitter's systems have flagged your activity as suspicious
+
+Wait at least 15 minutes before retrying.
+`);
+    } else {
+      console.error('Error details:', error);
+    }
+    
+    return false;
+  }
+}
+
+// Troubleshooting guide function
+function printTwitterTroubleshootingGuide(): void {
+  console.log(`
+=================================================
+TWITTER LOGIN TROUBLESHOOTING GUIDE
+=================================================
+
+1. Manual Check:
+   - Login to Twitter manually first in your browser
+   - Clear any CAPTCHA/verification challenges
+   - Make sure the account is in good standing
+
+2. Check Credentials:
+   - Verify username has correct capitalization (though it should be case-insensitive)
+   - Make sure password is correct (recently changed?)
+   - Double-check email matches Twitter account email
+
+3. Rate Limiting:
+   - If you've been attempting to login repeatedly, Twitter may temporarily block login attempts
+   - Try waiting 15-30 minutes before retrying
+   - Consider using a different IP address if possible
+
+4. Login Security:
+   - If you use 2FA, make sure it's disabled or you're handling it correctly
+   - Check if your account needs to approve new login locations
+
+5. Alternative Approach:
+   - Consider using Twitter's API with API keys instead
+   - This requires a developer account but is more reliable
+
+=================================================
+`);
 }
 
 async function start(): Promise<void> {
     console.log('[Start Function] Entered.'); // Log start function entry
+    const envValid = validateEnvironmentVariables();
+  if (!envValid) {
+    console.warn('Missing required environment variables - attempting to continue with available configuration...');
+    // Continue execution but with warning
+  }
+  
+  // Validate Twitter credentials specifically
+  const twitterValid = await validateTwitterCredentials();
+  if (!twitterValid) {
+    printTwitterTroubleshootingGuide();
+    console.warn('Twitter authentication failed - continuing with limited functionality...');
+    // Continue with server only, no Twitter bot
+  }
     
     // --- Restore Complex Initializations ---
     try {
@@ -660,10 +1036,7 @@ SERVER LISTENER ERROR on port ${port}
 
     console.log('[Start Function] Listener setup initiated (waiting for success/error).'); // Log after initiating listen
 }
-// app.get('/api/userBalance', getUserBalance);
-// app.post('/api/userBalance', updateUserBalance);
 
-// Ensure the global error handler is defined AFTER all routes and middleware
 app.use((err: Error, req: express.Request, res: express.Response, next: NextFunction) => {
     console.error("[Global Error Handler] Caught an error:", err);
     // Log stack trace for more details
