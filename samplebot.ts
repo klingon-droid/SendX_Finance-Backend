@@ -623,9 +623,11 @@ app.post('/api/transactions/complete', async (req, res) => {
       );
       
       const solscanUrl = `https://solscan.io/tx/${signature}`;
+      const claimUrl = `${process.env.FRONTEND_URL}`;
       await scraper.sendTweet(
         `@${transaction.sender} You've successfully sent ${transaction.amount} SOL to @${transaction.recipient}. ` +
-        `Tx: ${solscanUrl}`, 
+        `Tx: ${solscanUrl} \n\n` +
+        `@${transaction.recipient} You've received ${transaction.amount} SOL! Visit ${claimUrl} to claim your SOL.`, 
         transaction.tweetId
       );
     } catch (twitterError) {
