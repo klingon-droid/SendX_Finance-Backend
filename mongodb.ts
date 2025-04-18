@@ -16,7 +16,14 @@ const options = {
   connectTimeoutMS: 30000,
   socketTimeoutMS: 45000,
   tls: true,
-  tlsAllowInvalidCertificates: true // This is the key change
+  tlsAllowInvalidCertificates: true,
+  maxPoolSize: 10,
+  minPoolSize: 1,
+  retryWrites: true,
+  retryReads: true,
+  keepAlive: true,
+  serverSelectionTimeoutMS: 30000,
+  heartbeatFrequencyMS: 10000
 };
 
 let client;

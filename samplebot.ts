@@ -1,5 +1,6 @@
 import Redis from 'ioredis';
 import { Scraper, SearchMode } from 'agent-twitter-client';
+// @ts-ignore: no declaration file for module 'node-cron'
 import cron from 'node-cron';
 import { onchainAction } from './onChainAction';
 import { getUsername } from './username';
@@ -18,6 +19,25 @@ import bs58 from 'bs58';
 
 dotenv.config();
 
+const MAX_RETRIES = 5;
+const RETRY_DELAY = 5000;
+
+async function reconnectWithRetry(service: string, connectFn: () => Promise<any>): Promise<any> {
+    for (let i = 0; i < MAX_RETRIES; i++) {
+        try {
+            console.log(`Attempting to reconnect to ${service} (attempt ${i + 1}/${MAX_RETRIES})`);
+            return await connectFn();
+        } catch (error) {
+            console.error(`Failed to reconnect to ${service}:`, error);
+            if (i < MAX_RETRIES - 1) {
+                console.log(`Waiting ${RETRY_DELAY}ms before next retry...`);
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+            } else {
+                throw new Error(`Failed to reconnect to ${service} after ${MAX_RETRIES} attempts`);
+            }
+        }
+    }
+}
 
 // --- Global Error Handlers (Add these VERY FIRST) ---
 process.on('uncaughtException', (err, origin) => {
@@ -351,8 +371,42 @@ app.post('/api/userBalance', async (req, res) => {
   }
 });
 
-app.get('/health', (req: express.Request, res: express.Response) => {
-    res.json({ status: 'ok' });
+app.get('/health', async (req: express.Request, res: express.Response) => {
+    try {
+        // Check MongoDB connection
+        const { db } = await connectToDatabase();
+        await db.command({ ping: 1 });
+
+        // Check Redis connection
+        await redis.ping();
+
+        // Check memory usage
+        const memoryUsage = process.memoryUsage();
+        const memoryThreshold = 450 * 1024 * 1024; // 450MB threshold (below 512MB limit)
+
+        const status = {
+            status: 'ok',
+            timestamp: new Date().toISOString(),
+            services: {
+                mongodb: 'connected',
+                redis: 'connected'
+            },
+            memory: {
+                heapUsed: Math.round(memoryUsage.heapUsed / 1024 / 1024) + 'MB',
+                rss: Math.round(memoryUsage.rss / 1024 / 1024) + 'MB',
+                warning: memoryUsage.rss > memoryThreshold ? 'High memory usage' : null
+            }
+        };
+
+        res.json(status);
+    } catch (error) {
+        console.error('Health check failed:', error);
+        res.status(500).json({
+            status: 'error',
+            timestamp: new Date().toISOString(),
+            error: error.message
+        });
+    }
 });
 
 // Modified replyToTweet function to generate approval links
@@ -631,7 +685,24 @@ app.post('/api/transactions/complete', async (req, res) => {
   }
 });
 
-
+// Add after the imports
+function checkMemoryUsage() {
+    const memoryUsage = process.memoryUsage();
+    const memoryThreshold = 450 * 1024 * 1024; // 450MB threshold
+    
+    if (memoryUsage.rss > memoryThreshold) {
+        console.warn('High memory usage detected:', {
+            heapUsed: `${Math.round(memoryUsage.heapUsed / 1024 / 1024)}MB`,
+            rss: `${Math.round(memoryUsage.rss / 1024 / 1024)}MB`
+        });
+        
+        // Force garbage collection if available
+        if (global.gc) {
+            console.log('Forcing garbage collection...');
+            global.gc();
+        }
+    }
+}
 
 async function main(scraper: Scraper, privyClient: PrivyClient, llm: ChatGroq | Ollama): Promise<void> {
   try {
@@ -944,20 +1015,42 @@ TWITTER LOGIN TROUBLESHOOTING GUIDE
 }
 
 async function start(): Promise<void> {
-    console.log('[Start Function] Entered.'); // Log start function entry
+    console.log('[Start Function] Entered.');
+    
+    // Add error handlers for uncaught exceptions and unhandled rejections
+    process.on('uncaughtException', async (error) => {
+        console.error('Uncaught Exception:', error);
+        try {
+            await reconnectWithRetry('database', connectToDatabase);
+        } catch (reconnectError) {
+            console.error('Fatal: Could not recover from uncaught exception:', reconnectError);
+            process.exit(1);
+        }
+    });
+
+    process.on('unhandledRejection', async (reason, promise) => {
+        console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+        try {
+            await reconnectWithRetry('database', connectToDatabase);
+        } catch (reconnectError) {
+            console.error('Fatal: Could not recover from unhandled rejection:', reconnectError);
+            process.exit(1);
+        }
+    });
+
     const envValid = validateEnvironmentVariables();
-  if (!envValid) {
-    console.warn('Missing required environment variables - attempting to continue with available configuration...');
-    // Continue execution but with warning
-  }
-  
-  // Validate Twitter credentials specifically
-  const twitterValid = await validateTwitterCredentials();
-  if (!twitterValid) {
-    printTwitterTroubleshootingGuide();
-    console.warn('Twitter authentication failed - continuing with limited functionality...');
-    // Continue with server only, no Twitter bot
-  }
+    if (!envValid) {
+        console.warn('Missing required environment variables - attempting to continue with available configuration...');
+        // Continue execution but with warning
+    }
+    
+    // Validate Twitter credentials specifically
+    const twitterValid = await validateTwitterCredentials();
+    if (!twitterValid) {
+        printTwitterTroubleshootingGuide();
+        console.warn('Twitter authentication failed - continuing with limited functionality...');
+        // Continue with server only, no Twitter bot
+    }
     
     // --- Restore Complex Initializations ---
     try {
@@ -1028,6 +1121,9 @@ SERVER LISTENER ERROR on port ${port}
     });
 
     console.log('[Start Function] Listener setup initiated (waiting for success/error).'); // Log after initiating listen
+
+    // Add memory check interval
+    setInterval(checkMemoryUsage, 60000); // Check every minute
 }
 
 app.use((err: Error, req: express.Request, res: express.Response, next: NextFunction) => {
