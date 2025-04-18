@@ -178,8 +178,8 @@ async function withdrawHandler(req: Request, res: Response) {
     console.log('[withdrawHandler] Provided wallet address matches Privy wallet.');
 
     // Solana Transaction Logic
-    console.log('[withdrawHandler] Connecting to Solana devnet...');
-    const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
+    console.log('[withdrawHandler] Connecting to Solana mainnet-beta...');
+    const connection = new Connection(clusterApiUrl("mainnet-beta"), "confirmed");
     console.log('[withdrawHandler] Solana connection established.');
 
     try {
