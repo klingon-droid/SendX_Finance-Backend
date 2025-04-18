@@ -120,178 +120,144 @@ const LAST_REPLIED_TWEET_KEY = 'lastRepliedTweetId';
 // }
 
 async function withdrawHandler(req: Request, res: Response) {
-    console.log('[withdrawHandler] Entered function.'); // Log entry
-    console.log('Received withdrawal request:', {
-      method: req.method,
-      body: req.body
+  console.log('[withdrawHandler] Entered function.'); 
+  console.log('Received withdrawal request:', {
+    method: req.method,
+    body: req.body
+  });
+
+  if (req.method !== 'POST') {
+    console.log('Invalid method:', req.method);
+    return res.status(405).json({ 
+      message: 'Method not allowed',
+      error: 'Only POST requests are allowed'
     });
-  
-    if (req.method !== 'POST') {
-      console.log('Invalid method:', req.method);
-      return res.status(405).json({ 
-        message: 'Method not allowed',
-        error: 'Only POST requests are allowed'
+  }
+
+  try {
+    const { username, amount, recipientAddress, walletAddress } = req.body;
+    console.log('Parsed request body:', { username, amount, recipientAddress, walletAddress });
+
+    if (!username || !amount || !recipientAddress || !walletAddress) {
+      console.log('Missing required fields:', { username, amount, recipientAddress, walletAddress });
+      return res.status(400).json({ 
+        message: 'Missing required fields',
+        error: 'Username, amount, recipient address, and wallet address are required'
       });
     }
-  
+
+    // Skip database checks and go directly to Privy verification
+    console.log('[withdrawHandler] Initializing Privy client...'); 
+    const privyClient = new PrivyClient(
+      process.env.PRIVY_CLIENT_ID!,
+      process.env.PRIVY_CLIENT_SECRET!
+    );
+    console.log('[withdrawHandler] Privy client initialized.');
+
+    console.log(`[withdrawHandler] Getting Privy user by Twitter username: ${username}`); 
+    const privyUser = await privyClient.getUserByTwitterUsername(username);
+    
+    // Check if Privy user exists and has a wallet
+    if (!privyUser?.wallet?.address) {
+      console.log('[withdrawHandler] Privy user or wallet not found.');
+      return res.status(404).json({
+        message: 'Wallet not found',
+        error: 'User does not have a wallet associated with their Privy account'
+      });
+    }
+    console.log(`[withdrawHandler] Privy user found. Wallet Address: ${privyUser.wallet.address}`);
+
+    // Verify that the provided wallet address matches the Privy wallet
+    if (privyUser.wallet.address !== walletAddress) {
+      console.log('[withdrawHandler] Provided wallet address does not match Privy wallet.');
+      return res.status(400).json({
+        message: 'Invalid wallet address',
+        error: 'Provided wallet address does not match user\'s Privy wallet'
+      });
+    }
+    console.log('[withdrawHandler] Provided wallet address matches Privy wallet.');
+
+    // Solana Transaction Logic
+    console.log('[withdrawHandler] Connecting to Solana devnet...');
+    const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
+    console.log('[withdrawHandler] Solana connection established.');
+
     try {
-      const { username, amount, recipientAddress, walletAddress } = req.body;
-      console.log('Parsed request body:', { username, amount, recipientAddress, walletAddress });
-  
-      if (!username || !amount || !recipientAddress || !walletAddress) {
-        console.log('Missing required fields:', { username, amount, recipientAddress, walletAddress });
+      console.log(`[withdrawHandler inner try] Checking balance for wallet: ${walletAddress}`);
+      const walletBalance = await connection.getBalance(new PublicKey(walletAddress));
+      const walletBalanceInSol = walletBalance / LAMPORTS_PER_SOL;
+      console.log(`[withdrawHandler inner try] Wallet balance: ${walletBalanceInSol} SOL`);
+
+      // Check if wallet has enough SOL for transaction fees
+      const MINIMUM_FEE_BALANCE = 0.00001;
+      if (walletBalanceInSol < MINIMUM_FEE_BALANCE) {
+        console.log('[withdrawHandler inner try] Insufficient wallet balance for fees.');
         return res.status(400).json({ 
-          message: 'Missing required fields',
-          error: 'Username, amount, recipient address, and wallet address are required'
+          message: 'Insufficient wallet balance',
+          error: 'Your wallet needs at least 0.00001 SOL to cover transaction fees'
         });
       }
-  
-      // --- Revert Step 1 & 3: Find user in DB by username FIRST ---
-      console.log('[withdrawHandler] Connecting to database...'); // Log before DB connect
-      const { db } = await connectToDatabase();
-      const usersCollection = db.collection('users');
-      console.log('[withdrawHandler] Database connected.'); // Log after DB connect
-  
-      console.log(`[withdrawHandler] Finding user: ${username}`); // Log before DB find (using username)
-      const user = await usersCollection.findOne({ username }); // <<< REVERTED LOOKUP
-      if (!user) {
-        console.log('[withdrawHandler] User not found.'); // Log user not found
-        console.log('[withdrawHandler] Sending 404 response (User not found)...');
-        return res.status(404).json({
-          message: 'User not found',
-          error: 'User does not exist in the database' // Original error message
-        });
-      }
-      console.log(`[withdrawHandler] User found in DB. Balance: ${user.balance}`); // Log user found
 
-      // --- Revert Step 4: Check DB Balance ---
-      if (user.balance < amount) {
-        console.log('[withdrawHandler] Insufficient balance.'); // Log insufficient balance
-        console.log('[withdrawHandler] Sending 400 response (Insufficient balance)...');
-        return res.status(400).json({
-          message: 'Insufficient balance',
-          error: 'User does not have enough deposited SOL to withdraw' // Original message
-        });
-      }
-      console.log('[withdrawHandler] User has sufficient balance.');
-
-      // --- Revert Step 1 & 2: Get Privy User and Verify Wallet AFTER DB lookup ---
-      console.log('[withdrawHandler] Initializing Privy client...'); // Log before Privy init
-      const privyClient = new PrivyClient(
-        process.env.PRIVY_CLIENT_ID!,
-        process.env.PRIVY_CLIENT_SECRET!
+      console.log('[withdrawHandler inner try] Creating Solana transaction...');
+      // Create the transaction
+      const transaction = new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: new PublicKey(walletAddress),
+          toPubkey: new PublicKey(recipientAddress),
+          lamports: amount * LAMPORTS_PER_SOL,
+        })
       );
-      console.log('[withdrawHandler] Privy client initialized.'); // Log after Privy init
 
-      console.log(`[withdrawHandler] Getting Privy user by Twitter username: ${username}`); // Log before Privy getUser
-      const privyUser = await privyClient.getUserByTwitterUsername(username);
-      // Check if Privy user exists and has a wallet
-      if (!privyUser?.wallet?.address) {
-        console.log('[withdrawHandler] Privy user or wallet not found.'); // Log Privy user/wallet not found
-        console.log('[withdrawHandler] Sending 404 response (Wallet not found)...');
-        return res.status(404).json({
-          message: 'Wallet not found',
-          error: 'User does not have a wallet associated with their Privy account' // Adjusted message
-        });
-      }
-      console.log(`[withdrawHandler] Privy user found. Wallet Address: ${privyUser.wallet.address}`); // Log Privy user found
+      // Get the latest blockhash and calculate fees
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
+      transaction.feePayer = new PublicKey(walletAddress);
+      
+      // Calculate transaction fee
+      const fee = await connection.getFeeForMessage(transaction.compileMessage());
+      const feeInSol = typeof fee === 'number' ? fee / LAMPORTS_PER_SOL : 0;
+      console.log(`[withdrawHandler inner try] Transaction fee details:`, {
+        feeInLamports: fee,
+        feeInSol,
+        blockhash,
+        lastValidBlockHeight,
+        feePayer: walletAddress
+      });
 
-      // Verify that the provided wallet address matches the Privy wallet
-      if (privyUser.wallet.address !== walletAddress) {
-        console.log('[withdrawHandler] Provided wallet address does not match Privy wallet.'); // Log address mismatch
-        console.log('[withdrawHandler] Sending 400 response (Invalid wallet address)...');
-        return res.status(400).json({
-          message: 'Invalid wallet address',
-          error: 'Provided wallet address does not match user\\\'s Privy wallet'
-        });
-      }
-      console.log('[withdrawHandler] Provided wallet address matches Privy wallet.');
+      // Serialize the transaction for frontend signing
+      const serializedTransaction = transaction.serialize({
+        requireAllSignatures: false,
+        verifySignatures: false
+      }).toString('base64');
 
-      // --- Step 5: Solana Transaction Logic (largely unchanged) ---
-      console.log('[withdrawHandler] Connecting to Solana devnet...');
-      const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
-      console.log('[withdrawHandler] Solana connection established.'); // Log after Solana connection
-  
-      // --- Start of inner try block for Solana interaction ---
-      try {
-        console.log(`[withdrawHandler inner try] Checking balance for wallet: ${walletAddress}`); // Log before getBalance
-        const walletBalance = await connection.getBalance(new PublicKey(walletAddress));
-        const walletBalanceInSol = walletBalance / LAMPORTS_PER_SOL;
-        console.log(`[withdrawHandler inner try] Wallet balance: ${walletBalanceInSol} SOL`); // Log balance result
-  
-        // Only check if wallet has enough SOL for transaction fees (approximately 0.000005 SOL)
-        const MINIMUM_FEE_BALANCE = 0.00001; // 0.00001 SOL should be more than enough for fees
-        if (walletBalanceInSol < MINIMUM_FEE_BALANCE) {
-          console.log('[withdrawHandler inner try] Insufficient wallet balance for fees.'); // Log insufficient wallet balance
-          console.log('[withdrawHandler inner try] Sending 400 response (Insufficient wallet balance)...');
-          return res.status(400).json({ 
-            message: 'Insufficient wallet balance',
-            error: 'Your wallet needs at least 0.00001 SOL to cover transaction fees'
-          });
-        }
-  
-        console.log('[withdrawHandler inner try] Creating Solana transaction...'); // Log before Tx creation
-        // Create and sign the transaction
-        const transaction = new Transaction().add(
-          SystemProgram.transfer({
-            fromPubkey: new PublicKey(walletAddress),
-            toPubkey: new PublicKey(recipientAddress),
-            lamports: amount * LAMPORTS_PER_SOL,
-          })
-        );
-
-        // Get the latest blockhash and calculate fees
-        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-        transaction.recentBlockhash = blockhash;
-        transaction.feePayer = new PublicKey(walletAddress); // User pays their own fees
-        
-        // Calculate transaction fee
-        const fee = await connection.getFeeForMessage(transaction.compileMessage());
-        const feeInSol = typeof fee === 'number' ? fee / LAMPORTS_PER_SOL : 0;
-        console.log(`[withdrawHandler inner try] Transaction fee details:`, {
-          feeInLamports: fee,
-          feeInSol,
-          blockhash,
-          lastValidBlockHeight,
-          feePayer: walletAddress
-        });
-
-        // Return the serialized transaction to the frontend for user signing
-        const serializedTransaction = transaction.serialize({
-          requireAllSignatures: false,
-          verifySignatures: false
-        }).toString('base64');
-
-        return res.status(200).json({
-          message: 'Transaction ready for signing',
-          data: {
-            transaction: serializedTransaction,
-            fee: feeInSol,
-            transactionDetails: {
-              amount,
-              recipientAddress,
-              timestamp: new Date().toISOString()
-            }
+      return res.status(200).json({
+        message: 'Transaction ready for signing',
+        data: {
+          transaction: serializedTransaction,
+          fee: feeInSol,
+          transactionDetails: {
+            amount,
+            recipientAddress,
+            timestamp: new Date().toISOString()
           }
-        });
-      } catch (error) {
-        console.error('Error processing withdrawal:', error);
-        // Log before sending error response
-        console.log('[withdrawHandler inner catch] Sending 500 response...');
-        return res.status(500).json({ 
-          message: 'Failed to process withdrawal',
-          error: error instanceof Error ? error.message : 'Unknown error occurred during withdrawal'
-        });
-      }
+        }
+      });
     } catch (error) {
-      console.error('Error in withdrawHandler (outer catch):', error);
-      // Log before sending error response
-      console.log('[withdrawHandler outer catch] Sending 500 response...');
+      console.error('Error processing withdrawal:', error);
+      console.log('[withdrawHandler inner catch] Sending 500 response...');
       return res.status(500).json({ 
-        message: 'Internal server error',
-        error: error instanceof Error ? error.message : 'An unexpected error occurred'
+        message: 'Failed to process withdrawal',
+        error: error instanceof Error ? error.message : 'Unknown error occurred during withdrawal'
       });
     }
+  } catch (error) {
+    console.error('Error in withdrawHandler (outer catch):', error);
+    console.log('[withdrawHandler outer catch] Sending 500 response...');
+    return res.status(500).json({ 
+      message: 'Internal server error',
+      error: error instanceof Error ? error.message : 'An unexpected error occurred'
+    });
+  }
 }
 
 
@@ -414,6 +380,17 @@ async function replyToTweet(
       return;
     }
 
+    // NEW: Check if this is likely a payment intent by looking for specific keywords
+    const paymentKeywords = ['send', 'pay', 'transfer', 'sol', 'to @', 'to@'];
+    const hasPaymentIntent = paymentKeywords.some(keyword => 
+      tweetText.toLowerCase().includes(keyword.toLowerCase())
+    );
+
+    if (!hasPaymentIntent) {
+      console.log(`Skipping tweet ${tweet.id} because it doesn't appear to be a payment request`);
+      return;
+    }
+
     // Parse tweet to get recipient and amount
     const result = await getUsername(tweetText, llm, scraper, tweet.id);
     if (!result) {
@@ -426,6 +403,8 @@ async function replyToTweet(
     console.log('Recipient Username:', recipientUsername);
     console.log('Amount:', amount);
 
+    // Rest of the function remains the same...
+    
     // Additional validation to avoid loops: Don't process if recipient is the bot itself
     if (recipientUsername.toLowerCase() === myUsername?.toLowerCase()) {
       console.log(`Skipping tweet ${tweet.id} because recipient is our own bot`);
@@ -727,12 +706,24 @@ async function main(scraper: Scraper, privyClient: PrivyClient, llm: ChatGroq | 
           continue;
         }
 
+        // NEW: Pre-filter for payment keywords to avoid unnecessary processing
+        const paymentKeywords = ['send', 'pay', 'transfer', 'sol', 'to @', 'to@'];
+        const hasPaymentIntent = paymentKeywords.some(keyword => 
+          tweet.text.toLowerCase().includes(keyword.toLowerCase())
+        );
+
+        if (!hasPaymentIntent) {
+          console.log(`Tweet ${tweet.id} doesn't contain payment keywords, skipping.`);
+          processedTweetIds.add(tweet.id);
+          continue;
+        }
+
         if (tweetIdNum > lastRepliedTweetIdNum) {
           // Only process if it's a direct mention and not a retweet/quote
           if (tweet.text.toLowerCase().includes(`@${myUsername.toLowerCase()}`) && 
               !tweet.isRetweet && 
               !tweet.isQuoted) {
-            console.log(`Tweet ${tweet.id} is a valid mention. Replying...`);
+            console.log(`Tweet ${tweet.id} is a valid mention with payment intent. Replying...`);
             try {
               await replyToTweet(scraper, tweet, privyClient, llm);
               console.log('Successfully processed and replied to tweet ID:', tweet.id);
