@@ -1,5 +1,6 @@
 import Redis from 'ioredis';
 import { Scraper, SearchMode } from 'agent-twitter-client';
+// @ts-ignore: no declaration file for module 'node-cron'
 import cron from 'node-cron';
 import { onchainAction } from './onChainAction';
 import { getUsername } from './username';
