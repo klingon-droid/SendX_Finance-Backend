@@ -21,7 +21,7 @@ const options = {
   minPoolSize: 1,
   retryWrites: true,
   retryReads: true,
-  keepAlive: true,
+  // keepAlive: true,
   serverSelectionTimeoutMS: 30000,
   heartbeatFrequencyMS: 10000
 };
