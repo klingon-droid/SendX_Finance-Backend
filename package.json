@@ -10,7 +10,8 @@
     "dev": "ts-node samplebot.ts",
     "dev:watch": "nodemon --watch './**/*.ts' --exec 'ts-node' samplebot.ts",
     "clean": "rm -rf dist",
-    "prebuild": "npm run clean"
+    "prebuild": "npm run clean",
+    "postinstall": "patch-package"
   },
   "author": "",
   "license": "MIT",
@@ -48,6 +49,8 @@
   "devDependencies": {
     "@types/node-cron": "^3.0.11",
     "nodemon": "^3.1.9",
+    "patch-package": "^8.0.0",
+    "postinstall-postinstall": "^2.1.0",
     "ts-node": "^10.9.2"
   }
 }
