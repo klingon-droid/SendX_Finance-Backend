@@ -404,7 +404,7 @@ app.get('/health', async (req: express.Request, res: express.Response) => {
         res.status(500).json({
             status: 'error',
             timestamp: new Date().toISOString(),
-            error: error.message
+            error: (error as Error).message
         });
     }
 });
