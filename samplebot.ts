@@ -434,14 +434,30 @@ async function replyToTweet(
       return;
     }
 
-    // NEW: Check if this is likely a payment intent by looking for specific keywords
-    const paymentKeywords = ['send', 'pay', 'transfer', 'sol', 'to @', 'to@'];
-    const hasPaymentIntent = paymentKeywords.some(keyword => 
-      tweetText.toLowerCase().includes(keyword.toLowerCase())
-    );
+    // NEW: Check if this is likely a payment intent using improved detection logic
+    const containsSolToken = /\b(?:sol|solana)\b/i.test(tweetText.toLowerCase());
+    const containsActionVerb = /\b(?:send|transfer|pay)\b/i.test(tweetText.toLowerCase());
+    const containsToIndicator = /\bto @|\bto\s+@/i.test(tweetText.toLowerCase());
+
+    // Require both action verb AND either SOL or recipient indicator
+    const hasPaymentIntent = containsActionVerb && (containsSolToken || containsToIndicator);
 
     if (!hasPaymentIntent) {
       console.log(`Skipping tweet ${tweet.id} because it doesn't appear to be a payment request`);
+      return;
+    }
+
+    // Add a more rigorous check to validate overall tweet structure
+    // Looks for patterns like "send X SOL to @user" or "pay @user X SOL"
+    const paymentPatterns = [
+      /\b(?:send|transfer|pay)\s+(?:\d+(?:\.\d+)?)\s*(?:sol|solana)\s+(?:to\s+@|to@)[a-zA-Z0-9_]+\b/i,
+      /\b(?:send|transfer|pay)\s+(?:to\s+@|to@)[a-zA-Z0-9_]+\s+(?:\d+(?:\.\d+)?)\s*(?:sol|solana)\b/i
+    ];
+    
+    const hasValidPaymentStructure = paymentPatterns.some(pattern => pattern.test(tweetText));
+    
+    if (!hasValidPaymentStructure) {
+      console.log(`Skipping tweet ${tweet.id} because it doesn't have a valid payment command structure`);
       return;
     }
 
@@ -457,8 +473,6 @@ async function replyToTweet(
     console.log('Recipient Username:', recipientUsername);
     console.log('Amount:', amount);
 
-    // Rest of the function remains the same...
-    
     // Additional validation to avoid loops: Don't process if recipient is the bot itself
     if (recipientUsername.toLowerCase() === myUsername?.toLowerCase()) {
       console.log(`Skipping tweet ${tweet.id} because recipient is our own bot`);
